@@ -1,0 +1,85 @@
+- The data cover all transactions made between April 1st, 2013 and March 31st, 2014. 
+
+- The return policy has changed from 90 days to 45 days on October 1st, 2013.
+
+- Brand_number =5 : Secondary brand - brick-and-mortar stores 
+- Brand_number =3 : Outlet brand - brick-and-mortar stores 
+- Brand_number =8 : Sister brand - brick-and-mortar stores 
+- Brand_number =2 : Primary brand - brick-and-mortar stores 
+
+- There are three online channel stores with store numbers 2 (primary brand), 6 (secondary brand), and 10 (sister brand)
+
+- The return policy for online store 10 and for all sister brand brick-and-mortar stores (stores under Brand_number=8)
+has not changed. For those stores, the return policy was a 60 days-return policy before October 1st, 2013, and is still a 60-days return policy.
+
+- There are four different dta datasets. You can read a dataset using the following command that can be accessed after installing "readstata13" package in R 
+
+   read.dta13("PATH TO THE FILE/file_name.dta")
+
+   Example: Assuming the data file is on desktop,
+   read.dta13("C:/Users/nertekin/Desktop/BM store monthly sales-returns.dta")
+
+- Two of the datasets are for BM stores and two of them are online stores. 
+- You have two files for each channel because the data is constructed in two different ways. 
+  (a) For BM stores, the monthly sales-returns dataset includes sales and returns at each store for a given month. 
+      The monthly prod_cat sales-returns dataset includes sales and returns for each product category at store for a given month
+  (b) For online stores, the daily sales-returns dataset includes sales and returns at each store for a given day. 
+      The monthly prod_cat sales-returns dataset includes sales and returns for each product category at store for a given day
+
+- In each dataset, the control variables that start with "avg_" indicate the mean of those variables at the aggregated level. 
+  For instance, avg_female in monthly sales-returns dataset represents the ratio of female customers to all customers who shopped at a store in a given month.
+  The same variable in the monthly sales-returns prod_cat dataset represents the ratio of female customers to all customers who purchased a product in a given product category at a store in a given day
+
+VARIABLE DESCRIPTION:
+
+store_number : a uniqe ID for a store
+year: the year an observation belongs to
+month: the month an observation belongs to
+month_index: It is an index number for the month variable with the index for the first month (April 2013) in the data being 45  (only in BM store datasets)
+day: It is an index number for the day with the index for the first day (April 1st, 2013) in the data being 1  (only in online store datasets)
+brand_number: As described above (only in BM store datasets)
+month_dummy: Numeric illustration of the month variable. 4 is for April, 12 is for December, etc.
+salesvalue: Total $ value of sales
+returnvalue: Total $ value of returns
+salesquantity: total number of sales (a count variable)
+returnquantity: total number of returns (a count variable)
+avg_female: the ratio of all female customers to all customers at the given aggregation level
+avg_age: the average age_band of all customers at the given aggregation level. Note that this is not the actual age. It is the average of age groups. The higher it is, the older the customer profile is
+avg_income: the average income_band of all customers at the given aggregation level. Note that this is not the actual income level. It is the average of income groups. The higher it is, the richer the customer profile is
+avg_homeowner: the ratio of customers who own their house to all customers (homeowners + renters) at the given aggregation level
+avg_residency: the average number of years spent in the current address for customers at the given aggregation level. 
+avg_child: the ratio of customers who have at least one child to all customers at the given aggregation level
+store_average_price: the average price of all products sold at a given month in a given store (only in BM store datasets)
+store_number_of_skus: the number of product available for customers at a given month in a given store (only in BM store datasets)
+sa_gender: the ratio of female salespeople to all salespeople at a given month in a given store (only in BM store datasets)
+sa_full_time: the ratio of Full_time salespeople to all (full-time + part-time) salespeople at a given month in a given store (only in BM store datasets)
+sa_avg_years_of_exp: the average years of experience of all salespeople at a given month in a given store (only in BM store datasets)
+sa_married: the ratio of married salespeople to all (married + single) salespeople at a given month in a given store (only in BM store datasets)
+sa_avg_rate_of_pay: the average hourly wage of all salespeople at a given month in a given store (only in BM store datasets)
+sa_dependent: the ratio of salespeople with at least one child to all salespeople at a given month in a given store (only in BM store datasets)
+sales_volume_group: Indicates the annual sales volume a store generates. For instance, 1 may represent a store that generates $100K-%500K annually whereas
+                    2 may represent a store that generates $500K-$1M annually (only in BM store datasets)
+policy : The return policy in effect at a given time
+
+product_category: the indicator variable for product categories
+1-Bridal
+3-Solitaires
+4-Diamond Fashion
+11-Diamond Solitaires Jewelry
+20- Diamond Wedding Band
+2- Gold Wed Bands
+5-Semi Precious
+6-Mens
+7-Gold Earrings
+8-In House Special Event
+9-Beads
+10-Piercings / Close Out 
+12-Gold Chain / Jewelry 
+13-Watches 
+14-Pre-Owned 
+15-Specialized Jewelry
+16-Estate
+17-Events
+18-Trade Ins 
+19-Repair / Warranty
+21-Sterling Silver

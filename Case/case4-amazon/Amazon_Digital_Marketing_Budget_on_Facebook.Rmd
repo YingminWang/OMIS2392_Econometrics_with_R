@@ -1,0 +1,277 @@
+---
+title: "Amazon’s Digital Marketing Budget on Facebook"
+author: "Yingmin Wang"
+date: "12/25/2018"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+#==================================================
+# Background and Conclusion
+#==================================================
+```{r Background}
+# Facebook representatives claims $100M annual advertisement cost will generate $400M additional sales for Amazon. 
+
+# I quantify the effect of Facebook advertisement on customer's purchasing behavior to test whether the claim is true and whether Amazon's digital marketing budget on Facebook is reasonable.
+
+# sample data: 1) 1,255 customers always made purchases after clicking the Facebook ads
+#              2) 2,422 customers always made purchases without clicking the Facebook ads
+
+
+# other information: 1) 5 of 15 million Facebook users will click the Amazon ads to make a purchase,
+#                    2) 10 of 15 million Facebook users visit Amazon directly.They spend $500 on average annually. 
+```
+
+```{r Conclusion}
+# Customers shopping after visiting facebook will make 8.2% more purchase than customer shopping without visiting facebook
+
+# Additional sales generated from facebook advertising: 8.2% * $500 * 5M = $205M (less than $400M) 
+
+# Assumptions: 1) Average spent amount per purchase is same for both types’ customers
+#              2) 5 million customers make purchase always through Facebook
+
+# The benefit brought by Facebook advertisment is only $205M rather than $400M. According to the claim of Facebook representative, Amazon can ask for a lower marketing price.
+
+```
+
+
+#==================================================
+# SET UP
+#==================================================
+```{r}
+rm(list=ls())
+setwd('/Users/YingminWang/Desktop/OMIS\ 2392/Case/case4-amazon')
+dir()
+
+
+options(scipen=9)
+
+# install packages
+#install.packages("ggeffects")
+#install.packages("QuantPsyc")
+#install.packages("VIF")
+#install.packages("usdm")
+#install.packages("lmtest")
+#install.packages("multiwayvcov")
+#install.packages("sandwich")
+#install.packages("AER")
+#install.packages("aod")
+#install.packages("mfx")
+
+# Load libraries everytime you start a session
+library(stargazer)
+library(gdata)
+library(ggplot2)
+library(psych) 
+library(ggeffects)
+library(QuantPsyc)
+library(usdm)
+library(lmtest)
+library(multiwayvcov)
+library(sandwich)
+library(foreign)
+library(AER)
+library(aod)
+library(Rcpp)
+library(mfx)
+library(nnet)
+library(reshape2)
+library(VIF)
+library(msm)
+```
+
+
+#==========================================================
+## READ AND EXPLORE DATA
+#==========================================================
+```{r}
+mydata <- read.csv('Amazon.csv')
+
+stargazer(mydata, type='text', title='descriptive analysis', digits=2, median=TRUE, iqr=TRUE)  # descriptive statistics
+head(mydata) 
+
+
+# 1. Research question: the influence of facebook visit on purchase?
+
+# 2. dependent variable: <purchase>: number of purchases made by customer i
+ggplot(mydata, aes(x=purchase)) + geom_histogram(color='green')
+ggplot(mydata, aes(x=log(purchase))) + geom_histogram(color='green') # use log form is more normally distributed
+mydata$lnpurchase <- log(mydata$purchase)
+
+# 3. key variable: <facebookvisit>: equals to 1 if a customer’s all purchases are after a Facebook visit and 0 if a customer’s all purchases are without visiting Facebook.
+ggplot(mydata, aes(x=facebookvisit, y=purchase, fill=facebookvisit)) + geom_boxplot()+
+        scale_fill_discrete(name='Facebook visit', breaks=c(0,1), labels=c('with FB visit','without FB visit'))+
+        scale_x_discrete(breaks=c(0,1),labels=c('with FB visit','without FB visit')) # customer purchase more after visiting facebook
+
+
+# 4. control variable:
+        # 1) income
+ggplot(mydata, aes(x=income)) + geom_histogram(color='green')
+ggplot(mydata, aes(x=log(income))) + geom_histogram(color='green') # raw data is better
+ggplot(mydata, aes(x=factor(income), y=lnpurchase, fill=income))+ geom_boxplot()
+
+        # 2) gender 
+ggplot(mydata, aes(x=factor(gender), y=lnpurchase, fill=factor(gender))) + geom_boxplot() # female purchase more
+
+        # 3) distance 
+ggplot(mydata, aes(x=distance)) + geom_histogram(color='green')
+ggplot(mydata, aes(x=log(distance))) + geom_histogram(color='green')
+ggplot(mydata, aes(x=factor(distance), y=lnpurchase, fill=distance)) + geom_boxplot()# further away from downtown, more purchase
+
+        
+        # 4) cust_age
+ggplot(mydata, aes(x=cust_age)) + geom_histogram(color='green')
+ggplot(mydata, aes(x=log(cust_age))) + geom_histogram(color='green')
+
+```
+
+
+#===================================================
+# BUILD UP MODEL
+#===================================================
+```{r Poisson}
+        # 1. multicollinearity  ==> no multicollinearity
+df <- mydata[c('lnpurchase', 'facebookvisit', 'income', 'gender', 'distance', 'cust_age','numoffriends','numofposts'
+               , 'PublicProfile')]
+cor(df)
+
+df2 <- mydata[c('facebookvisit', 'income', 'gender', 'distance', 'cust_age','numoffriends','numofposts', 'PublicProfile')]
+vif(df2)
+
+## Poisson Regression       
+        # 2. select model 
+poisson1 <- glm(purchase ~ facebookvisit + income + gender + distance + cust_age, family='poisson', data=mydata)
+stargazer(poisson1, 
+          title='regression results', type='text', 
+          column.labels = 'model-1',
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+# add [numoffriends] ==> no better
+poisson1b <- update(poisson1, .~. + numoffriends)
+anova(poisson1b, poisson1, test='Chisq')
+
+# add [numofposts]  ==> poisson1c better
+poisson1c <- update(poisson1, .~. +numofposts)
+anova(poisson1c, poisson1, test='Chisq')
+
+# add [publicprofile]  ==> no better
+poisson1d <- update(poisson1c, .~. + PublicProfile)
+anova(poisson1d, poisson1c, test='Chisq')
+
+## Final poisson model- poisson1c
+
+        # 3. Test Heteroscedasticity
+gqtest(poisson1c)
+bptest(poisson1c)  # significant indicates Heteroscedasticity
+
+HWrobstder <- sqrt(diag(vcovHC(poisson1c,type='HC1')))
+
+stargazer(poisson1c, 
+          apply.coef = exp, t.auto = F, p.auto = F,
+          se=HWrobstder,
+          title='Regression Results', type='text',
+          column.labels = "IRRs with HW-Robust SE",
+          df=FALSE, digits=3, star.cutoffs = c(0.05,0.01,0.001))
+# Customer who shopping after visiting facebook will make 7.7% more purchase than customer who shopping without visiting facebook
+
+        # 4. Test Model Fit
+poisson1f <- glm(purchase~1, data=mydata, family='poisson')
+
+lrtest(poisson1c, poisson1f) # significant indicates possion does not fit the data
+```
+
+
+```{r Negative Binomial}
+        # 2. select model 
+negbin1 <- glm.nb(purchase ~ facebookvisit + income + gender + distance + cust_age , data=mydata)
+
+#[publicprofile] ==> no better
+negbin1b <- update(negbin1, .~. + PublicProfile)
+anova(negbin1b,negbin1, test='Chisq')
+
+# [numoffriends] ==> no better
+negbin1c <- update(negbin1, .~. + numoffriends)
+anova(negbin1c, negbin1, test='Chisq')
+
+# [numofposts] ==> no better
+negbin1d <- update(negbin1, .~. + numofposts)
+anova(negbin1d, negbin1, test='Chisq')
+
+## final model - negbin1
+
+        # 3. Test Heteroscedasticity
+gqtest(negbin1)
+bptest(negbin1) # significant indicates Heteroscedasticity
+
+HWrobstder2 <- sqrt(diag(vcovHC(negbin1,, type="HC1")))
+
+stargazer(negbin1, 
+          apply.coef = exp, t.auto = F, p.auto = F,
+          se=HWrobstder2,
+          title='Regression Results', type='text',
+          column.labels = "IRRs with HW-Robust SE",
+          df=FALSE, digits=3, star.cutoffs = c(0.05,0.01,0.001))
+# Customer who shopping after visiting facebook will make 8.2% more purchase than customer who shopping without visiting facebook
+
+        # 4. Test Model Fit
+negbin1a <- glm.nb(purchase ~ 1, data=mydata)
+lrtest(negbin1a,negbin1) # significant indicates negative binomial model fits the data
+```
+
+```{r Model Selection from Poisson and Negative Binomial}
+lrtest(negbin1, poisson1c) # significant indicates negative binomial is better
+
+## Conclusion: 
+#       Customer who shopping after visiting facebook will make 8.2% more purchase than customer who shopping without visiting facebook
+```
+
+
+#==========================================================
+## TEST FOR ENDOGENEITY USING OLS MODEL
+#==========================================================
+```{r linear regression}
+        #2. Select Model
+lm1 <- lm(lnpurchase ~ facebookvisit + income + gender + distance + cust_age , data=mydata)
+
+        #3. Test Heteroscedasticity
+pred <- predict(lm1)
+residual <- resid(lm1)
+df3 <- data.frame(pred, residual) 
+ggplot(df3, aes(x=pred, y=residual)) + geom_point(size=1.5)  
+
+gqtest(lm1)
+bptest(lm1) # significant indicates Heteroscedasticity
+HWrobstderlm <- sqrt(diag(vcovHC(lm1, type='HC1')))
+
+stargazer(lm1, type ='text', title='Regression Result',
+          column.labels = c('HW SE'),
+          SE=list(HWrobstderlm),
+          digits=2, df=FALSE, star.cutoffs = c(0.05,0.01,0.001)
+          )
+```
+
+```{r Compare linear regression model with negative binomial model}
+stargazer(m1,negbin1,  
+          title="Regression Results", type="text", 
+          column.labels=c("Linear Regression", "Negative Binomial"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+confint(negbin1, 'facebookvisit') # coefficient of 'facebookvisit' in lm model(0.06) is within 95% CI of negative binomial model, thus the two models are comparable. We can use lm to test endogeneity.
+```
+
+```{r Test Endogeneity}
+df4 <- mydata[c('lnpurchase', 'facebookvisit','numoffriends','numofposts','PublicProfile')]
+cor(df4)
+
+model1<- ivreg(lnpurchase~ facebookvisit + income +gender +cust_age + distance |numoffriends + numofposts + PublicProfile + income +gender +cust_age + distance, data=mydata) 
+
+summary(model1,diagnostics=TRUE) 
+# Insignificant Sargan statistic indicates that the instruments are exogenous; 
+# Weak instrument statistic 565.519 >10 indicates that the instruments are relevant;
+# Significant Durbin-Wu-Hausman test statistic indicates that endogeneity in the model is negligible. 
+# Conclusion: Endogeneity in this dataset is negligible, OLS is sufficient.
+#             Since dependent variable is a count variable, I finally report the result from negative binomial model. 
+
+```
+
+

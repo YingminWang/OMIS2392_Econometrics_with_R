@@ -1,0 +1,2312 @@
+---
+title: "Final Project Return Policy"
+author: "Yiwen Zheng£¬ Yi Lu, Yuning Zhao, Yingmin Wang, Randy Shi"
+date: "11/30/2018"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+rm(list = ls())
+setwd("C:/Users/Randy Shi/Desktop/Course Material/OMIS 2392/Return policy change")
+
+library(readstata13)
+library(stargazer)
+library(gdata)
+library(ggplot2)
+library(psych) 
+library(ggeffects)
+library(QuantPsyc)
+library(usdm)
+library(lmtest)
+library(multiwayvcov)
+library(sandwich)
+library(foreign)
+library(AER)
+library(aod)
+library(Rcpp)
+library(mfx)
+library(nnet)
+library(reshape2)
+library(VIF)
+
+options(scipen = 4)
+BM_Store = read.dta13("BM store monthly sales-returns.dta")
+BM_Store_pc = read.dta13("BM store monthly prod_cat sales-returns.dta")
+Online_Store = read.dta13("Online store daily sales-returns.dta")
+Online_Store_pc = read.dta13("Online store daily prod_cat sales-returns.dta")
+
+```
+
+#----------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+##Question 1: impact on online channel sale
+
+
+
+#----------------------------------------------------------------------------------------------------------------------------------------
+
+
+#======================================
+## Analyses on Online Store
+#======================================
+
+#======================================
+## STORE LEVEL: Overall Investigation & Data Cleaning
+#======================================
+
+```{r}
+stargazer(Online_Store, 
+          type='text', title='descriptive analysis',
+          digits=2, median=TRUE, iqr=TRUE
+          )
+
+# Replace missing value with mean
+Online_Store$avg_female[is.na(Online_Store$avg_female)] <- 0.62
+
+Online_Store$avg_age[is.na(Online_Store$avg_age)] <- 4.37
+
+Online_Store$avg_income[is.na(Online_Store$avg_income)] <-5.33
+
+Online_Store$avg_homeowner[is.na(Online_Store$avg_homeowner)] <- 0.68
+
+Online_Store$avg_residency[is.na(Online_Store$avg_residency)] <- 7.24
+
+Online_Store$avg_childowner[is.na(Online_Store$avg_childowner)] <- 0.44
+
+
+# set dummy variable for time group
+#       month_group =0 : before policy change (2013.04.01-2013.09.30)
+#       month_group =1 : after policy change(2013.10.01 - 2014.03.01)
+# set dummy variable for store group
+#       policy_change = 0 : without policy change(store number=10)
+#       policy_change = 1 : with policy change(store number =2 or 6 )
+Online_Store $ policy_change = ifelse(Online_Store $ store_number %in% c(2,6), 1, 0)
+Online_Store $ month_group = ifelse(Online_Store $ month_dummy %in% c(4,5,6,7,8,9),0,1)
+```
+
+
+
+
+#======================================
+## STORE LEVEL: Impact on Online Sales Value
+#======================================
+```{r}
+### explore data
+ggplot(Online_Store, aes(x=salesvalue)) + geom_histogram(color='green')
+ggplot(Online_Store, aes(x=log(salesvalue))) + geom_histogram(color='green')
+Online_Store$lnsalesvalue = log(Online_Store$salesvalue+1)
+
+
+### multicollinearity
+df_online_sv_1 = Online_Store[c('lnsalesvalue','policy_change','month_group', 'avg_female','avg_age','avg_income','avg_homeowner','avg_residency','avg_childowner')]
+
+cor(df_online_sv_1)
+
+df_online_sv_2 = Online_Store[c('policy_change','month_group', 'avg_female','avg_age','avg_income','avg_homeowner','avg_residency','avg_childowner')]
+
+cor(df_online_sv_2)
+
+### linear model
+
+lm_online_sv_1 = lm(lnsalesvalue ~ 
+                      month_group * policy_change + avg_female + avg_age + avg_income + 
+                      avg_homeowner + avg_residency + avg_childowner, 
+                    data = Online_Store
+                    )
+step<-stepAIC(lm_online_sv_1, direction='both')
+step$anova
+
+lm_online_sv_2 = lm(lnsalesvalue ~ 
+                      month_group * policy_change + avg_female + avg_age + avg_income + 
+                      avg_homeowner + avg_childowner, 
+                    data = Online_Store
+                    )
+anova(lm_online_sv_1,lm_online_sv_2, test='Chisq')
+# model with avg_residency is better (lm_online_sv_1)
+
+lm_online_sv_3 = lm(lnsalesvalue ~ 
+                      month_group*policy_change + avg_female + avg_age + avg_income + 
+                      avg_homeowner +avg_childowner+ avg_residency, 
+                    data = Online_Store
+                    )
+        
+stargazer(lm_online_sv_3, type='text',title='Online Return Value LM 3 result',
+          column.labels = 'lm1a', df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+# the impact of return policy on lnsalesvalue is insignificant 
+
+##### Heteroskedasticity 
+gqtest(lm_online_sv_3)
+bptest(lm_online_sv_3)
+
+HWrobstder <- sqrt(diag(vcovHC(lm_online_sv_3, type='HC1')))
+
+stargazer(lm_online_sv_3, type='text',title='Online_Salesvalue', se=list(HWrobstder),
+          column.labels = c("HW-Robust SE"), df=FALSE, digits=2, 
+          star.cutoffs = c(0.05,0.01,0.001))
+
+# the impact of return policy on lnsalevalue is insignificant 
+
+
+#### Marginal Effect
+meffect_online_sv = ggpredict(lm_online_sv_3, terms=c('month_group', 'policy_change'))
+
+ggplot(meffect_online_sv, aes(x, predicted, color=group)) + geom_line(size=1.3) + 
+        xlab('Time') + ylab('ln(Sales Value)') + 
+        scale_color_discrete(labels=c('Policy changed', 'Policy unchanged'))+ 
+        scale_x_continuous(breaks = c(0,1), labels = c('Before policy change', 'After policy change'))
+```
+
+#======================================
+## STORE LEVEL: Impact on Online Sales Quantity
+#======================================
+
+```{r}
+
+ggplot(Online_Store, aes(salesquantity)) + geom_histogram(color = 'green')
+ggplot(Online_Store, aes(log(salesquantity))) + geom_histogram(color = 'green')
+# Online_daily_store$lnsalesquantity <- log(Online_daily_store$salesquantity+1)
+
+### multicollinearity
+df_online_sq_1 = Online_Store[c('salesquantity','policy_change','month_group', 'avg_female','avg_age','avg_income',
+                             'avg_homeowner','avg_residency','avg_childowner')]
+cor(df_online_sq_1)
+
+df_online_sq_2 <- Online_Store[c('policy_change','month_group', 'avg_female','avg_age','avg_income',
+                             'avg_homeowner','avg_residency','avg_childowner')]
+cor(df_online_sq_2)
+
+
+####  poisson model
+poisson_online_sq_1 = glm(salesquantity ~ 
+                            month_group*policy_change + avg_female + avg_age + avg_income + 
+                            avg_homeowner + avg_residency +avg_childowner, 
+                          data = Online_Store, family = 'poisson'
+                          )
+
+poisson_online_sq_2 = glm(salesquantity ~ 
+                            month_group*policy_change + avg_female + avg_age + avg_income + 
+                            avg_homeowner +avg_childowner, 
+                          data = Online_Store, family = 'poisson'
+                          )
+
+anova(poisson_online_sq_1, poisson_online_sq_2, test='Chisq')
+# significant ==> model with avg_residency is better(poisson_online_sq_1)
+
+stargazer(poisson_online_sq_1, type='text', title='Online Sales Quantity Poisson 1 Model', column.labels ='poisson1',
+          apply.coef = exp, t.auto=F, p.auto=F,
+          digits=2, df=FALSE, star.cutoffs=c(0.05,0.01,0.001) )
+# with return policy, sales quantity will decrease 3%.
+
+
+## model fit
+poisson_online_sq_1a <- glm(salesquantity~1, data = Online_Store, family='poisson')
+lrtest(poisson_online_sq_1,poisson_online_sq_1a)
+# significant ==> poisson model does not fit the data
+
+
+### Heteroskedasticity
+bptest(poisson_online_sq_1)
+gqtest(poisson_online_sq_1)
+# significant ==> has heteroskedasticity
+
+HWrobstder2 <- sqrt(diag(vcovHC(poisson_online_sq_1, type='HC1')))
+
+stargazer(poisson_online_sq_1, type='text', title='regression model', column.labels ='poisson1-IRR-robust SE',
+          apply.coef = exp, t.auto=F, p.auto=F,
+          se=list(HWrobstder2),
+          digits=2, df=FALSE, star.cutoffs=c(0.05,0.01,0.001) )
+
+# with return policy, sales quantity will decrease by 3%.
+
+
+####  negative binomial model
+negbi_online_sq_1 = glm.nb(salesquantity ~ 
+                             policy_change*month_group + avg_female + avg_age + avg_income +
+                             avg_homeowner + avg_residency + avg_childowner, 
+                           data = Online_Store) 
+
+negbi_online_sq_2 = glm.nb(salesquantity ~ 
+                             policy_change*month_group + avg_female + avg_age + avg_income +
+                             avg_homeowner + avg_childowner, 
+                           data = Online_Store) 
+anova(negbi_online_sq_1, negbi_online_sq_2, test='Chisq')
+# insignificant ==> with avg_residency is better (negbi_online_sq_1)
+
+stargazer(negbi_online_sq_1,  title="Regression Results", type="text", column.labels=c("negbin1a-IRR"),
+          apply.coef = exp, t.auto=F, p.auto=F,
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+# return policy has no significant change on sales quantity
+
+
+### Heterosckedasticity
+gqtest(negbi_online_sq_1)    #significant
+bptest(negbi_online_sq_1)    #significant
+
+HWrobstder3<- sqrt(diag(vcovHC(negbi_online_sq_1, type='HC1')))
+
+stargazer(negbi_online_sq_1,  title="Online_Salesquantity", type="text", column.labels=c("negbin1a-IRR-robust SE"),
+          apply.coef = exp, t.auto=F, p.auto=F,
+          se=list(HWrobstder3),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+# interaction still insignificant ==> return policy has no significant change on sales quantity
+
+
+### MODEL FIT
+negbi_online_sq_1a <- glm.nb(salesquantity~1, data = Online_Store)
+lrtest(negbi_online_sq_1, negbi_online_sq_1a)  #significant==> negative binomial model fits the data
+
+
+
+######## CHOOSE MODEL BETWEEN POISSON & NEGATIVE BINOMIAL
+lrtest(poisson_online_sq_1, negbi_online_sq_1)
+# significant ==> choose negative binomial 
+
+####### MARGINAL EFFECTS
+
+meffect_online_sq <- ggpredict(negbi_online_sq_1, terms=c('month_group', 'policy_change'))
+ggplot(meffect_online_sq, aes(x, predicted, color=group)) + geom_line(size=1.3) + 
+        xlab('Time') + ylab('Sales Quantity') + 
+        scale_color_discrete(labels=c('Policy changed', 'Policy unchanged'))+ 
+        scale_x_continuous(breaks = c(0,1), labels = c('Before policy change', 'After policy change'))
+
+
+#Conclusion: return policy change has no significant impact on online salesvalue and sales quantity
+
+```
+
+#----------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+##Question 2: impact on BM channel sale
+
+
+
+#----------------------------------------------------------------------------------------------------------------------------------------
+
+#==============================
+## Descrptive Analysis for BM_Store Sales Value
+#==============================
+
+```{r}
+stargazer(BM_Store, type="text", median=TRUE, iqr=TRUE,digits=1, title="Store Descriptive Statistics")  
+  
+ggplot(BM_Store, aes(x=salesvalue)) + geom_histogram(color="green")
+ggplot(BM_Store, aes(x=log(salesvalue))) + geom_histogram(color="green")
+
+ggplot(BM_Store, aes(x=factor(month_index), y=salesvalue, fill=month_index)) + geom_boxplot() + 
+  xlab("month_index") + ylab("salesvalue")
+ggplot(BM_Store, aes(x=avg_age)) + geom_histogram(colour="green") 
+ggplot(BM_Store, aes(x=avg_female)) + geom_histogram(colour="green") 
+ggplot(BM_Store, aes(x=avg_homeowner)) + geom_histogram(colour="green") 
+ggplot(BM_Store, aes(x=avg_residency)) + geom_histogram(colour="green") 
+ggplot(BM_Store, aes(x=avg_childowner )) + geom_histogram(colour="green") 
+ggplot(BM_Store, aes(x=store_average_price )) + geom_histogram(colour="green") 
+ggplot(BM_Store, aes(x=store_number_of_skus)) + geom_histogram(colour="green") 
+ggplot(BM_Store, aes(x=log(store_number_of_skus )  )) + geom_histogram(colour="green")    
+ggplot(BM_Store, aes(y=log(salesvalue), x=log(store_number_of_skus ))) + geom_point(size=2.5)  
+ggplot(BM_Store, aes(y=log(salesvalue), x=log(store_number_of_skus ))) + geom_point(aes(colour = factor(brand_number)), size=2.5) 
+ggplot(BM_Store, aes(y=log(salesvalue), x=sa_full_time)) + geom_point(size=2.5)  
+ggplot(BM_Store, aes(x=sa_full_time)) + geom_histogram(colour="green") 
+ggplot(BM_Store, aes(x=log(sa_avg_years_of_exp) )) + geom_histogram(colour="green") 
+ggplot(BM_Store, aes(y=log(salesvalue), x=log(sa_avg_years_of_exp))) + geom_point(size=2.5) 
+ggplot(BM_Store, aes(x=log(sa_avg_rate_of_pay) )) + geom_histogram(colour="green") 
+ggplot(BM_Store, aes(y=log(salesvalue), x=log(sa_avg_rate_of_pay))) + geom_point(size=2.5) 
+ggplot(BM_Store, aes(x=sa_dependent)) + geom_histogram(colour="green")  
+ggplot(BM_Store, aes(x=sales_volume_group )) + geom_histogram(colour="green") 
+
+#from ggplot, we decided to log transfer salesvalue and store_number_of_skus
+#salesvalue is quite different between brand8 and brand 2,3,5, and since this two groups correpond to no policy change and with policy change, so we suspect the residual of our model might end up with clusters due to the lack of data to cover the brands' difference.
+```
+#==============================
+##Creating Dummy Variables for Policy Change and Time
+#==============================
+```{r}
+#Creating a dummy variable where policy is 60 days as 0 and policy is 45 days or 90 days as 1
+BM_Store$policy_change = ifelse(BM_Store$policy == "90 days",1, ifelse(BM_Store$policy == "45 days",1,0))
+#Create a dummy varialbe where month before Oct as 0 and after Oct as 1
+BM_Store$month_group = ifelse(BM_Store$month_index >= 51, 1, 0)
+
+ggplot(BM_Store, aes(x=factor(month_index), y=salesvalue, fill=salesvalue)) + geom_boxplot() + facet_grid(policy_change ~ brand_number)+ xlab("month_index") + ylab("salesvalue")
+ggplot(BM_Store, aes(x=factor(month_index), y=salesvalue, fill=salesvalue)) + geom_boxplot() + facet_grid(policy_change ~ brand_number,scales='free')+ xlab("month_index") + ylab("salesvalue")
+```
+#=========================
+##Cleaning Data
+#==========================
+```{r}
+### replate NA with the column mean 
+BM_Store$avg_female<-ifelse(is.na(BM_Store$avg_female),mean(BM_Store$avg_female, na.rm=T),BM_Store$avg_female)
+
+BM_Store$avg_age<-ifelse(is.na(BM_Store$avg_age),mean(BM_Store$avg_age, na.rm=T),BM_Store$avg_age)
+
+BM_Store$avg_income<-ifelse(is.na(BM_Store$avg_income),mean(BM_Store$avg_income, na.rm=T),BM_Store$avg_income)
+
+BM_Store$avg_homeowner<-ifelse(is.na(BM_Store$avg_homeowner),mean(BM_Store$avg_homeowner, na.rm=T),BM_Store$avg_homeowner)
+
+BM_Store$avg_residency<-ifelse(is.na(BM_Store$avg_residency),mean(BM_Store$avg_residency, na.rm=T),BM_Store$avg_residency)
+
+BM_Store$avg_childowner<-ifelse(is.na(BM_Store$avg_childowner),mean(BM_Store$avg_childowner, na.rm=T),BM_Store$avg_childowner)
+
+BM_Store$store_average_price<-ifelse(is.na(BM_Store$store_average_price),mean(BM_Store$store_average_price, na.rm=T),BM_Store$store_average_price)
+
+BM_Store$store_number_of_skus<-ifelse(is.na(BM_Store$store_number_of_skus),mean(BM_Store$store_number_of_skus, na.rm=T),BM_Store$store_number_of_skus)
+
+BM_Store$sa_gender<-ifelse(is.na(BM_Store$sa_gender),mean(BM_Store$sa_gender, na.rm=T),BM_Store$sa_gender)
+
+BM_Store$sa_full_time<-ifelse(is.na(BM_Store$sa_full_time),mean(BM_Store$sa_full_time, na.rm=T),BM_Store$sa_full_time)
+
+BM_Store$sa_avg_years_of_exp<-ifelse(is.na(BM_Store$sa_avg_years_of_exp),mean(BM_Store$sa_avg_years_of_exp, na.rm=T),BM_Store$sa_avg_years_of_exp)
+
+BM_Store$sa_married<-ifelse(is.na(BM_Store$sa_married),mean(BM_Store$sa_married, na.rm=T),BM_Store$sa_married)
+
+BM_Store$sa_avg_rate_of_pay<-ifelse(is.na(BM_Store$sa_avg_rate_of_pay),mean(BM_Store$sa_avg_rate_of_pay, na.rm=T),BM_Store$sa_avg_rate_of_pay)
+
+BM_Store$sa_dependent<-ifelse(is.na(BM_Store$sa_dependent),mean(BM_Store$sa_dependent, na.rm=T),BM_Store$sa_dependent)
+
+BM_Store$sales_volume_group<-ifelse(is.na(BM_Store$sales_volume_group),mean(BM_Store$sales_volume_group, na.rm=T),BM_Store$sales_volume_group)
+
+```
+#=======================
+## MULTICOLLINEARITY
+#=======================
+```{r}
+
+##create a data frame including original data except potential dependent variables(salesvalue, returnvalue,salesquantity and returnquantity, for month and year variables, we only include the newly created dummy
+df_bm = data.frame(BM_Store$brand_number, BM_Store$avg_female, BM_Store$avg_age, 
+                   BM_Store$avg_income, BM_Store$avg_homeowner, BM_Store$avg_residency,
+                   BM_Store$avg_childowner, BM_Store$store_average_price, BM_Store$store_number_of_skus,
+                   BM_Store$sa_gender,BM_Store$sa_full_time, BM_Store$sa_avg_years_of_exp, 
+                   BM_Store$sa_married,  BM_Store$sa_avg_rate_of_pay, BM_Store$sa_dependent,
+                   BM_Store$sales_volume_group, BM_Store$policy_change, BM_Store$month_group
+                   )
+
+
+    cor(df_bm) #remove brand_number?
+    vifcor(df_bm) #remove brand_number
+    
+df_bm_1 = data.frame(BM_Store$avg_female, BM_Store$avg_age, BM_Store$avg_income, BM_Store$avg_homeowner,
+                     BM_Store$avg_residency, BM_Store$avg_childowner, BM_Store$store_average_price,
+                     BM_Store$store_number_of_skus, BM_Store$sa_gender, BM_Store$sa_full_time, 
+                     BM_Store$sa_avg_years_of_exp, BM_Store$sa_married,  BM_Store$sa_avg_rate_of_pay, 
+                     BM_Store$sa_dependent, BM_Store$sales_volume_group, BM_Store$policy_change, BM_Store$month_group
+                     )    
+
+    vifcor(df_bm_1) ####store_average_price and sales_volume_group are over 3, remove sales_volume_group
+
+df_bm_2 = data.frame(BM_Store$avg_female, BM_Store$avg_age, BM_Store$avg_income, BM_Store$avg_homeowner, 
+                     BM_Store$avg_residency, BM_Store$avg_childowner, BM_Store$store_average_price, 
+                     log(BM_Store$store_number_of_skus), BM_Store$sa_gender, BM_Store$sa_full_time, 
+                     BM_Store$sa_avg_years_of_exp, BM_Store$sa_married, BM_Store$sa_avg_rate_of_pay, 
+                     BM_Store$sa_dependent,BM_Store$policy_change, BM_Store$month_group
+                     ) 
+    
+    vifcor(df_bm_2) ####all vif are below 3   
+```
+#============================
+##  Model Building -- salesvalue as dependent variable
+#============================
+```{r}
+
+lm_bm_sv_1 = lm(log(salesvalue) ~ 
+                  policy_change + month_group + avg_female + avg_age + avg_income +
+                  avg_homeowner + avg_residency + avg_childowner + store_average_price + 
+                  log(store_number_of_skus) + sa_gender + sa_full_time + sa_avg_years_of_exp + 
+                  sa_married + sa_avg_rate_of_pay + sa_dependent + I(policy_change * month_group), 
+                data = BM_Store
+                )
+ 
+stargazer(lm_bm_sv_1,
+          type="text",digits=2,tile="BM Store Sales Value LM 1 Results ") 
+# positive interaction coeffcient, this is against intuition, we tried model  without log transfer store_number_of_skus and try again.
+
+
+lm_bm_sv_2 = lm(log(salesvalue) ~ 
+                  policy_change + month_group + avg_female + avg_age + avg_income + 
+                  avg_homeowner + avg_residency + avg_childowner + store_average_price +  
+                  sa_gender + sa_full_time + sa_avg_years_of_exp + store_number_of_skus+sa_married + 
+                  sa_avg_rate_of_pay + store_average_price + sa_dependent + I(policy_change * month_group), 
+                data = BM_Store
+                ) # negative interaction coeffcient
+
+stargazer(lm_bm_sv_2,
+          type="text",digits=2,titile="BM Store Sales Value LM 2 Results "
+          )
+
+AIC(lm_bm_sv_1,lm_bm_sv_2)
+BIC(lm_bm_sv_1,lm_bm_sv_2) #both AIC and BIC shows lm_bm_sv_1 is better, we stick with lm_bm_sv_1.
+
+
+##lm_bm_sv_1 residual plot
+
+BM_Store$residual1 = resid(lm_bm_sv_1)
+BM_Store$pred1<-predict(lm_bm_sv_1)
+
+
+
+ggplot(BM_Store, aes(y=residual1, x=pred1)) + geom_point(size=2.5) # the residual plot clusters by brand_number due to the different predicted value brought by different brands. Due to the lack of data, we can not account for the brands difference(brand 8 has 60days policy which remain the same(no policy change), while the other three brands' policy changed from 90 to 45 days.
+
+
+ggplot(BM_Store, aes(y=residual1, x=pred1)) + geom_point(aes(colour = factor(brand_number)), size=2.5) # the colored plot verified our assumptions. 
+                                                                    
+qqnorm(BM_Store$residual1)
+
+qqline(BM_Store$residual1,col=2)
+```
+#=========================
+##  HETEROSCEDASTICITY for BM Sales Value
+#=========================
+```{r}
+
+gqtest(lm_bm_sv_1) 
+
+bptest(lm_bm_sv_1) # Significant Breusch-Pagan test  indicates heteroscedasticity
+
+HWrobstder <- sqrt(diag(vcovHC(lm_bm_sv_1, type="HC1")))
+
+stargazer(lm_bm_sv_1, lm_bm_sv_1,  
+          se=list(NULL, HWrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE"),
+          df=FALSE, digits=3, star.cutoffs = c(0.05,0.01,0.001))
+```
+#=========================
+##  Marginal Effect for BM
+#=========================
+```{r}
+
+meffect_bm <- ggpredict(lm_bm_sv_1, terms=c("month_group","policy_change")) 
+
+meffect_bm$lnpredicted <-log(meffect_bm$predicted)
+
+ggplot(meffect_bm,aes(x, lnpredicted, colour=group)) + geom_line(size = 1) + 
+  xlab("Time") + ylab("Predicted Sales Value") +
+  labs(colour="policy_change") + 
+  theme(axis.title.x=element_blank())
+# the two slop difference is 0.076674, this is similar to our main model interation coeffcient.
+```
+#==========================
+##  Model Buiding-Sales Quantity as dependant variable 
+#==========================
+```{r}
+
+#poisson 1
+poisson_bm_sq_1 = glm(salesquantity ~ 
+                        policy_change + month_group + avg_female + avg_age + 
+                        avg_income + avg_homeowner + avg_residency + avg_childowner +
+                        store_average_price + store_number_of_skus + sa_gender +
+                        sa_full_time + sa_avg_years_of_exp + sa_married + sa_avg_rate_of_pay + store_average_price+
+                        sa_dependent + I(policy_change * month_group), 
+                      family="poisson",
+                      data = BM_Store
+                      )
+
+stargazer(poisson_bm_sq_1, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="BM Store Poisson 1 Result", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001))
+
+gqtest(poisson_bm_sq_1) 
+bptest(poisson_bm_sq_1)
+HWrobstder = sqrt(diag(vcovHC(poisson_bm_sq_1, type="HC1")))
+
+stargazer(poisson_bm_sq_1, poisson_bm_sq_1,  
+          se=list(NULL, HWrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE"),
+          df=FALSE, digits=3, star.cutoffs = c(0.05,0.01,0.001))
+
+poisson_bm_sq_1a = glm(salesquantity ~ 1, data = BM_Store, family="poisson") 
+lrtest(poisson_bm_sq_1a, poisson_bm_sq_1a)#statistically significant, model doesn't fit the data
+
+
+####Negative Binomial
+negbi_bm_sq_1 = glm.nb(salesquantity ~ 
+                         policy_change + month_group + avg_female + avg_age + avg_income + 
+                         avg_homeowner + avg_residency + avg_childowner + store_average_price + 
+                         store_number_of_skus + sa_gender + sa_full_time + sa_avg_years_of_exp + 
+                         sa_married + sa_avg_rate_of_pay + store_average_price + sa_dependent + 
+                         I(policy_change * month_group), 
+                       data = BM_Store
+                       )
+
+
+negbi_bm_sq_2 = glm.nb(salesquantity ~ 
+                         policy_change + month_group + avg_female + avg_age + avg_income + 
+                         avg_homeowner + avg_residency + avg_childowner + store_average_price + 
+                         sa_gender + sa_full_time + sa_avg_years_of_exp + sa_married + 
+                         sa_avg_rate_of_pay + store_average_price + sa_dependent + 
+                         I(policy_change * month_group), 
+                       data = BM_Store
+                       )
+
+lrtest(negbi_bm_sq_1,negbi_bm_sq_2)#significant, negbi_bm_sq_1 is better
+
+
+negbi_bm_sq_3 = glm.nb(salesquantity ~ 
+                         policy_change + month_group + avg_female + avg_age + avg_income + 
+                         avg_homeowner + avg_residency + avg_childowner + store_average_price + 
+                         log(store_number_of_skus) + sa_gender + sa_full_time + sa_avg_years_of_exp + 
+                         sa_married + sa_avg_rate_of_pay + store_average_price + sa_dependent + 
+                         I(policy_change * month_group), 
+                       data = BM_Store
+                       ) #log transfer store_number_of_skus
+
+AIC(negbi_bm_sq_1,negbi_bm_sq_3)
+BIC(negbi_bm_sq_1,negbi_bm_sq_3) #negbi_bm_sq_3 is better
+
+gqtest(negbi_bm_sq_3) 
+bptest(negbi_bm_sq_3) #Significant Breusch-Pagan test indicates heteroscedasticity. 
+
+HWrobstder <- sqrt(diag(vcovHC(negbi_bm_sq_3, type="HC1")))
+
+stargazer(negbi_bm_sq_3, negbi_bm_sq_3,  
+          se=list(NULL, HWrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+# Model fit assessment
+negbi_bm_sq_1a <- glm.nb(salesquantity ~ 1, data = BM_Store) 
+lrtest(negbi_bm_sq_3, negbi_bm_sq_1a) # # Model fits the data because LR test statistics is  significant.
+```
+
+#----------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+##Question 3: impact on online channel return
+
+
+
+#----------------------------------------------------------------------------------------------------------------------------------------
+
+#======================================
+## STORE LEVEL: Impact on Online Return Value
+#======================================
+
+```{r}
+stargazer(Online_Store, type='text', title='descriptive analysis',
+          digits=2, median=TRUE, iqr=TRUE)
+
+
+#### EXPLORE DATA 
+ggplot(Online_daily_store, aes(returnvalue)) + geom_histogram(color='green')
+ggplot(Online_daily_store, aes(log(returnvalue))) + geom_histogram(color='green')
+
+Online_Store$lnreturnvalue <- log(Online_Store$returnvalue+1)
+Online_Store$lnsalesvalue <- log(Online_Store$salesvalue+1)
+Online_Store$lnsalesquantity <- log(Online_Store$salesquantity+1)
+
+#### MULTICOLLINEARITY
+df_online_rv_1 = Online_Store[c('lnreturnvalue','policy_change','month_group', 'avg_female','avg_age','avg_income','avg_homeowner','avg_residency','avg_childowner','lnsalesvalue')]
+cor(df_online_rv_1)    # lnsalesvalue >0.8 remove
+
+df_online_rv_2 <- Online_Store[c('policy_change','month_group','avg_female','avg_age','avg_income','avg_homeowner','avg_residency','avg_childowner')]
+cor(df_online_rv_2)
+
+#### linear regression
+lm_online_rv_1 = lm(lnreturnvalue ~ 
+                      month_group*policy_change + avg_female + avg_age + avg_income + 
+                      avg_homeowner + avg_residency +avg_childowner, 
+                    data = Online_Store
+                    )
+step <- stepAIC(lm_online_rv_1, direction='both')
+step$anova
+
+lm_online_rv_2 <- lm(lnreturnvalue ~ month_group*policy_change + avg_female + avg_age + 
+                       avg_income + avg_homeowner + avg_residency + avg_childowner, 
+                     data = Online_Store
+                     )
+
+lm_online_rv_3 <-lm(lnreturnvalue ~ month_group*policy_change + lnsalesvalue + avg_female + 
+                      avg_age + avg_income + avg_homeowner + avg_residency + avg_childowner, 
+                    data = Online_Store
+                    )
+
+anova(lm_online_rv_2, lm_online_rv_3, test='Chisq') # significant, include log(salesvalue+1) (lm_online_rv_3)
+
+gqtest(lm_online_rv_3)   #significant
+bptest(lm_online_rv_3)   # insignificant
+
+HWrobstder3a <- sqrt(diag(vcovHC(lm_online_rv_3, type='HC1')))
+
+stargazer(lm_online_rv_3, type='text',title='Online_Returnvalue', se=list(HWrobstder3a),
+          column.labels = c("HW-Robust SE"), df=FALSE, digits=2, 
+          star.cutoffs = c(0.05,0.01,0.001))
+# change of return policy has insignificant impact on online store returnvalue 
+
+## Marginal Effects
+meffect_online_rv <- ggpredict(lm_online_rv_3, terms=c('month_group', 'policy_change'))
+ggplot(meffect_online_sv, aes(x, predicted, color=group)) + geom_line(size=1.3) + 
+        xlab('Time') + ylab('ln(Return Value)') + 
+        scale_color_discrete(labels=c('Policy changed', 'Policy unchanged'))+ 
+        scale_x_continuous(breaks = c(0,1), labels = c('Before policy change', 'After policy change'))
+```
+
+
+
+#======================================
+## STORE LEVEL: Impact on Online Return Quantity
+#======================================
+
+```{r}
+#### Multicollinearity
+df_online_rq_1 = Online_Store[c('returnquantity','policy_change','month_group', 'avg_female','avg_age','avg_income','avg_homeowner','avg_residency','avg_childowner','salesquantity')]
+
+cor(df_online_rq_1)    # salesquantity >0.8 remove
+
+###### POISSON
+poisson_online_rq_1 = glm(returnquantity ~ 
+                            month_group*policy_change + avg_female + avg_age + avg_income + 
+                            avg_homeowner + avg_residency +avg_childowner, 
+                          data = Online_Store, family='poisson'
+                          )
+
+
+poisson_online_rq_2 = glm(returnquantity ~ 
+                            month_group*policy_change + salesquantity+ avg_female + avg_age + 
+                            avg_income + avg_homeowner + avg_residency +avg_childowner, 
+                         data = Online_Store, family='poisson'
+                        )
+
+poisson_online_rq_3 = glm(returnquantity ~ month_group*policy_change + lnsalesquantity + 
+                            avg_female + avg_age + avg_income + avg_homeowner + 
+                            avg_residency + avg_childowner, 
+                         data = Online_Store, family='poisson'
+                        )
+
+AIC(poisson_online_rq_2,poisson_online_rq_3)
+BIC(poisson_online_rq_2,poisson_online_rq_3)  # log(salesquantity+1) is better(poisson_online_rq_2)
+
+anova(poisson_online_rq_1,poisson_online_rq_3, test='Chisq')  # significant ==> with log(salesquantity+1) is better(poisson_online_rq_2)
+
+stargazer(poisson_online_rq_2, type='text', title='Q3-returnquantity-poisson', column.labels = 'poisson-IRR',
+          apply.coef = exp, t.auto = F, p.auto = F,
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+# return policy change will decrease return quantity by 19%.
+### HETEROSKEDASTICITY
+bptest(poisson_online_rq_3)   # significant
+gqtest(poisson_online_rq_3)   # significant
+
+HWrobstder3b <- sqrt(diag(vcov(poisson_online_rq_3, type='HC1')))
+
+stargazer(poisson_online_rq_3, poisson_online_rq_3, type='text', title='Q3-returnquantity-poisson-IRR', 
+          apply.coef = exp, t.auto = F, p.auto = F,
+          se=list(NULL, HWrobstder3b), column.labels = c("Normal SE", "HW-Robust SE"), 
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+# ===> change of return policy decrease return quantity by 19% 
+
+
+#### MODEL FIT
+poisson_online_rq_3a <- glm(returnquantity~1, data=Online_Store,family='poisson')
+lrtest(poisson_online_rq_3, poisson_online_rq_3a)
+# significant ==> the poisson model doe not fit the data
+
+
+
+######## NEGATICE BINOMIAL
+negbi_online_rq_1 = glm.nb(returnquantity ~ 
+                             month_group*policy_change + avg_female + avg_age + avg_income + 
+                             avg_homeowner + avg_residency +avg_childowner, 
+                           data = Online_Store
+                           )
+
+negbi_online_rq_2 = glm.nb(returnquantity ~ 
+                             month_group*policy_change + lnsalesquantity + avg_female + 
+                             avg_age + avg_income + avg_homeowner + avg_residency + avg_childowner, 
+                           data = Online_Store
+                           )
+
+lrtest(negbi_online_rq_1, negbi_online_rq_2)
+# significant ==> with log(salesquantity+1) is better (negbi_online_rq_2)
+
+
+stargazer(negbi_online_rq_2, type='text', title='Q3-returnquantity-NB', column.labels = 'negative binomial-IRR',
+          apply.coef = exp, t.auto = F, p.auto = F,
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+# return policy change will decrease return quantity by 11%
+
+
+
+
+###### HETEROSKEDASTICITY
+gqtest(negbi_online_rq_2)  # significant 
+bptest(negbi_online_rq_2)  # significant
+
+HWrobstder3c <- sqrt(diag(vcov(negbi_online_rq_2, type='HC1')))
+
+stargazer(negbi_online_rq_2, type='text', title='Online_Returnquantity', 
+          apply.coef = exp, t.auto = F, p.auto = F,
+          se=list(HWrobstder3c), column.labels = c("HW-Robust SE"), 
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+# return policy change will decrease return quantity by 11%
+
+#### MODEL fit
+negbi_online_rq_2a <- glm.nb(returnquantity ~1, data = Online_Store)
+
+lrtest(negbi_online_rq_2, negbi_online_rq_2a)   # significant, NB model fits the data
+
+###### CHOOSE MODEL
+lrtest(poisson_online_rq_3, negbi_online_rq_2) # significant, NB model is better
+
+
+#### Marginal Effects
+meffect_online_rq <- ggpredict(negbi_online_rq_2, terms=c('month_group', 'policy_change'))
+ggplot(meffect_online_rq, aes(x, predicted, color=group)) + geom_line(size=1.3) + 
+        xlab('Time') + ylab('Return Quantity') + 
+        scale_color_discrete(labels=c('Policy changed', 'Policy unchanged'))+ 
+        scale_x_continuous(breaks = c(0,1), labels = c('Before policy change', 'After policy change'))
+
+
+# Conclusion: change of return policy has insignificant impact on online store returnvalue,
+#                                       but will decrease return quantity by 11%
+```
+
+
+
+#----------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+##Question 4: impact on BM channel return
+
+
+
+#----------------------------------------------------------------------------------------------------------------------------------------
+
+#========================
+##  Returnvalue --- Descriptive Analysis
+#========================
+```{r}
+###
+ggplot(BM_Store, aes(x=returnvalue)) + geom_histogram(color="green")
+ggplot(BM_Store, aes(x=log(returnvalue))) + geom_histogram(color="green")
+
+ggplot(BM_Store, aes(x=factor(month_index), y=returnvalue, fill=month_index)) + geom_boxplot() + 
+  xlab("month_index") + ylab("returnvalue")
+
+ggplot(BM_Store, aes(y=log(returnvalue), x=log(store_number_of_skus ))) + geom_point(size=2.5)  
+ggplot(BM_Store, aes(y=log(returnvalue), x=log(store_number_of_skus ))) + geom_point(aes(colour = factor(brand_number)), size=2.5) 
+ggplot(BM_Store, aes(y=log(returnvalue), x=sa_full_time)) + geom_point(size=2.5)  
+
+ggplot(BM_Store, aes(y=log(returnvalue), x=log(sa_avg_years_of_exp))) + geom_point(size=2.5) 
+
+ggplot(BM_Store, aes(y=log(returnvalue), x=log(sa_avg_rate_of_pay))) + geom_point(size=2.5) 
+
+ggplot(BM_Store, aes(x=factor(month_index), y=returnvalue, fill=returnvalue)) + geom_boxplot() + facet_grid(policy_change ~ brand_number)+ xlab("month_index") + ylab("returnvalue")
+ggplot(BM_Store, aes(x=factor(month_index), y=returnvalue, fill=returnvalue)) + geom_boxplot() + facet_grid(policy_change ~ brand_number,scales='free')+ xlab("month_index") + ylab("returnvalue")
+
+ggplot(BM_Store, aes(x=factor(month_index), y=returnvalue, fill=returnvalue)) + geom_boxplot() + facet_grid(policy_change ~ brand_number)+ xlab("product") + ylab("returnvalue")
+ggplot(BM_Store, aes(x=factor(month_index), y=returnvalue, fill=returnvalue)) + geom_boxplot() + facet_grid(policy_change ~ brand_number,scales='free')+ xlab("month_index") + ylab("returnvalue")
+
+
+# conclusion: we should log transfer return value, and the return value of brand 8 is much lower than brands: 2, 3, 5, since we won't be able to account for the brands difference in our model, the residual plot might be clusters as well.
+```
+#==========================
+##  Return Value as dependent variable-Model Buiding
+#=========================
+```{r}
+lm_bm_rv_1 = lm(log(returnvalue + 1) ~ 
+                  policy_change + month_group + avg_female + avg_age + 
+                  avg_income + avg_homeowner + avg_residency + avg_childowner + 
+                  store_average_price + log(store_number_of_skus) + sa_gender + 
+                  sa_full_time + sa_avg_years_of_exp + sa_married + sa_avg_rate_of_pay + 
+                  store_average_price + sa_dependent + 
+                  I(policy_change * month_group), 
+                data = BM_Store
+                )
+
+stargazer(lm_bm_rv_1,type="text",digits=2,titile="BM Store Return Value LM 1 Results ")
+
+##residual plot
+
+BM_Store$residual3 = resid(lm_bm_rv_1)
+BM_Store$pred3 <- predict(lm_bm_rv_1)
+
+ggplot(BM_Store, aes(y=residual3, x=pred3)) + geom_point(size=2.5) # the residual plot clusters might due to the difference brought by different brands. 
+
+
+qqnorm(BM_Store$residual3)
+
+qqline(BM_Store$residual3,col=2)
+
+gqtest(lm_bm_rv_1) 
+
+bptest(lm_bm_rv_1) # Significant Breusch-Pagan test indicates heteroscedasticity
+
+HWrobstder <- sqrt(diag(vcovHC(lm_bm_rv_1, type="HC1")))
+stargazer(lm_bm_rv_1, lm_bm_rv_1,  
+          se=list(NULL, HWrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE"),
+          df=FALSE, digits=3, star.cutoffs = c(0.05,0.01,0.001))
+
+```
+#=========================
+##  Return Quantity as dependent variable-Model Buiding 
+#=========================
+```{r}
+
+#poisson 2
+
+df_bm_3 = data.frame(BM_Store$brand_number, BM_Store$avg_female,BM_Store$avg_age, BM_Store$avg_income, 
+                     BM_Store$avg_homeowner, BM_Store$avg_residency, BM_Store$avg_childowner, 
+                     BM_Store$store_average_price, BM_Store$store_number_of_skus, BM_Store$sa_gender,
+                     BM_Store$sa_full_time, BM_Store$sa_avg_years_of_exp, BM_Store$sa_married,  
+                     BM_Store$sa_avg_rate_of_pay, BM_Store$sa_dependent, BM_Store$sales_volume_group, 
+                     BM_Store$policy_change, BM_Store$month_group
+                     )
+
+vifcor(df_bm_3) #remove brand_number
+
+df_bm_4 = data.frame(BM_Store$avg_female, BM_Store$avg_age, BM_Store$avg_income, BM_Store$avg_homeowner, 
+                     BM_Store$avg_residency, BM_Store$avg_childowner, BM_Store$store_average_price, 
+                     BM_Store$store_number_of_skus, BM_Store$sa_gender, BM_Store$sa_full_time, 
+                     BM_Store$sa_avg_years_of_exp, BM_Store$sa_married,  BM_Store$sa_avg_rate_of_pay, 
+                     BM_Store$sa_dependent, BM_Store$sales_volume_group, BM_Store$policy_change, BM_Store$month_group
+                     )
+
+vifcor(df_bm_4) #remove sales_volumn_group
+
+df_bm_5 = data.frame(BM_Store$avg_female, BM_Store$avg_age, BM_Store$avg_income, BM_Store$avg_homeowner, 
+                     BM_Store$avg_residency, BM_Store$avg_childowner, BM_Store$store_average_price, 
+                     BM_Store$store_number_of_skus, BM_Store$sa_gender, BM_Store$sa_full_time, 
+                     BM_Store$sa_avg_years_of_exp, BM_Store$sa_married,  BM_Store$sa_avg_rate_of_pay, 
+                     BM_Store$sa_dependent, BM_Store$policy_change, BM_Store$month_group
+                     )
+
+vifcor(df_bm_5) #all vif are below 3.
+
+poisson_bm_rq_1 = glm(returnquantity ~ 
+                        policy_change + month_group + avg_female + avg_age + avg_income + avg_homeowner + 
+                        avg_residency + avg_childowner + store_average_price + store_number_of_skus + 
+                        sa_gender + sa_full_time + sa_avg_years_of_exp + sa_married + sa_avg_rate_of_pay + 
+                        store_average_price + sa_dependent + 
+                        I(policy_change * month_group), 
+                      family = "poisson", data = BM_Store
+                      )
+
+stargazer(poisson_bm_rq_1, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="BM Store Return Quantity Poisson Result", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001))
+
+gqtest(poisson_bm_rq_1) 
+bptest(poisson_bm_rq_1) # Significant Breusch-Pagan test indicates heteroscedasticity
+
+HWrobstder <- sqrt(diag(vcovHC(poisson_bm_rq_1, type="HC1")))
+
+stargazer(poisson_bm_rq_1, poisson_bm_rq_1,  
+          se=list(NULL, HWrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE"),
+          df=FALSE, digits=3, star.cutoffs = c(0.05,0.01,0.001))
+poisson_bm_rq_1a <- glm(returnquantity~1, data = BM_Store, family="poisson") 
+lrtest(poisson_bm_rq_1, poisson_bm_rq_1a) #statistically significant, model doesn't fit the data
+
+
+####Negative Binomial
+negbi_bm_rq_1 = glm.nb(returnquantity ~ 
+                         policy_change + month_group + avg_female + avg_age + 
+                         avg_income + avg_homeowner + avg_residency + avg_childowner + 
+                         store_average_price + store_number_of_skus + sa_gender + 
+                         sa_full_time + sa_avg_years_of_exp + sa_married + sa_avg_rate_of_pay + 
+                         store_average_price + sa_dependent + 
+                         I(policy_change * month_group), 
+                       data = BM_Store
+                       )
+
+negbi_bm_rq_2 = glm.nb(returnquantity ~ 
+                         policy_change + month_group + avg_female + avg_age + 
+                         avg_income + avg_homeowner + avg_residency + avg_childowner + 
+                         store_average_price + log(store_number_of_skus) + sa_gender + 
+                         sa_full_time + sa_avg_years_of_exp + sa_married + sa_avg_rate_of_pay + 
+                         store_average_price + sa_dependent + 
+                         I(policy_change * month_group), 
+                       data = BM_Store
+                       )
+
+AIC(negbi_bm_rq_1,negbi_bm_rq_2)
+BIC(negbi_bm_rq_1,negbi_bm_rq_2) #negbi_bm_rq_2 is better than negbi_bm_rq_1 due to smaller AIC and BIC scores.
+
+gqtest(negbi_bm_rq_2) 
+bptest(negbi_bm_rq_2) #Significant Breusch-Pagan test  indicates heteroscedasticity. 
+
+HWrobstder <- sqrt(diag(vcovHC(negbi_bm_rq_2, type="HC1")))
+stargazer(negbi_bm_rq_2, negbi_bm_rq_2,  
+          se=list(NULL, HWrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) ##policy and oct interaction significant, the return policy bring 9% quantity increase.
+
+# Model fit assessment
+negbi_bm_rq_2a <- glm.nb(returnquantity ~ 1, data = BM_Store) 
+lrtest(negbi_bm_rq_2, negbi_bm_rq_2a) # # Model fits the data because LR test statistics is  significant.
+```
+
+
+#----------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+##Question 5: impact on product level sales & returns in online & BM channels
+
+
+
+#----------------------------------------------------------------------------------------------------------------------------------------
+
+#========
+## Descriptive Data Analysis
+#========
+
+#====
+#BM Data
+#====
+```{r}
+stargazer(BM_Store_pc, type="text", median=TRUE, iqr=TRUE, digits=1, title="Store Descriptive Statistics")  
+
+ggplot(BM_Store_pc, aes(x=salesvalue)) + geom_histogram(color="green")
+ggplot(BM_Store_pc, aes(x=log(salesvalue))) + geom_histogram(color="green")
+
+ggplot(BM_Store_pc, aes(x=factor(month_index), y=salesvalue, fill=month_index)) + geom_boxplot() + 
+  xlab("month_index") + ylab("salesvalue")
+
+ggplot(BM_Store_pc, aes(x=avg_age)) + geom_histogram(colour="green") 
+ggplot(BM_Store_pc, aes(x=avg_female)) + geom_histogram(colour="green") 
+ggplot(BM_Store_pc, aes(x=avg_homeowner)) + geom_histogram(colour="green") 
+ggplot(BM_Store_pc, aes(x=avg_residency)) + geom_histogram(colour="green") 
+ggplot(BM_Store_pc, aes(x=avg_childowner )) + geom_histogram(colour="green") 
+ggplot(BM_Store_pc, aes(x=store_average_price )) + geom_histogram(colour="green") 
+ggplot(BM_Store_pc, aes(x=store_number_of_skus)) + geom_histogram(colour="green") 
+ggplot(BM_Store_pc, aes(x=log(store_number_of_skus )  )) + geom_histogram(colour="green")    
+ggplot(BM_Store_pc, aes(y=log(salesvalue), x=log(store_number_of_skus ))) + geom_point(size=2.5)  
+ggplot(BM_Store_pc, aes(y=log(salesvalue), x=log(store_number_of_skus ))) + geom_point(aes(colour = factor(brand_number)), size=2.5) 
+ggplot(BM_Store_pc, aes(y=log(salesvalue), x=sa_full_time)) + geom_point(size=2.5)  
+ggplot(BM_Store_pc, aes(x=sa_full_time)) + geom_histogram(colour="green") 
+ggplot(BM_Store_pc, aes(x=log(sa_avg_years_of_exp) )) + geom_histogram(colour="green") 
+ggplot(BM_Store_pc, aes(y=log(salesvalue), x=log(sa_avg_years_of_exp))) + geom_point(size=2.5) 
+ggplot(BM_Store_pc, aes(x=log(sa_avg_rate_of_pay) )) + geom_histogram(colour="green") 
+ggplot(BM_Store_pc, aes(y=log(salesvalue), x=log(sa_avg_rate_of_pay))) + geom_point(size=2.5) 
+ggplot(BM_Store_pc, aes(x=sa_dependent)) + geom_histogram(colour="green")  
+ggplot(BM_Store_pc, aes(x=sales_volume_group )) + geom_histogram(colour="green") 
+```
+
+#Creating Dummy and Factor
+```{r}
+#### add dummy variable where policy is 60days as 0 and policy is 45days or 90 days as 1
+BM_Store_pc$policy_change = ifelse(BM_Store_pc$policy == "90 days",1,ifelse(BM_Store_pc$policy == "45 days",1, 0)) 
+
+#add dummy varialbe where month before Oct as 0 and after Oct as 1
+BM_Store_pc$month_group = ifelse(BM_Store_pc$month_index >=51,1,0) 
+
+ggplot(BM_Store_pc, aes(x=factor(product_category), y=salesquantity, fill=salesquantity)) + geom_boxplot() + facet_grid(policy_change ~ brand_number,scales='free')+ xlab("product category") + ylab("salesquantity") # from this plot we can tell, brand8, the policy control group doesn't have product category: 3,8,11,18,19,20,so we can not compare the return policy change for these products.
+
+BM_Store_pc$pcfactor = as.factor(BM_Store_pc$product_category)
+
+summary(BM_Store_pc$pcfactor)  #category 21 is highest, so we use 21 as reference group.
+levels(BM_Store_pc$pcfactor)<-c("21" ,"1", "2",  "3",  "4",  "5",  "6",  "7",  "8",  "9",  "10", "11", "12", "13", "14", "15", "16", "17","18", "19", "20" )
+```
+#Data Cleaning
+```{r}
+### replate NA with the column mean 
+BM_Store_pc$avg_female<-ifelse(is.na(BM_Store_pc$avg_female),mean(BM_Store_pc$avg_female, na.rm=T),BM_Store_pc$avg_female)
+BM_Store_pc$avg_age<-ifelse(is.na(BM_Store_pc$avg_age),mean(BM_Store_pc$avg_age, na.rm=T),BM_Store_pc$avg_age)
+BM_Store_pc$avg_income<-ifelse(is.na(BM_Store_pc$avg_income),mean(BM_Store_pc$avg_income, na.rm=T),BM_Store_pc$avg_income)
+BM_Store_pc$avg_homeowner<-ifelse(is.na(BM_Store_pc$avg_homeowner),mean(BM_Store_pc$avg_homeowner, na.rm=T),BM_Store_pc$avg_homeowner)
+BM_Store_pc$avg_residency<-ifelse(is.na(BM_Store_pc$avg_residency),mean(BM_Store_pc$avg_residency, na.rm=T),BM_Store_pc$avg_residency)
+BM_Store_pc$avg_childowner<-ifelse(is.na(BM_Store_pc$avg_childowner),mean(BM_Store_pc$avg_childowner, na.rm=T),BM_Store_pc$avg_childowner)
+BM_Store_pc$store_average_price<-ifelse(is.na(BM_Store_pc$store_average_price),mean(BM_Store_pc$store_average_price, na.rm=T),BM_Store_pc$store_average_price)
+BM_Store_pc$store_number_of_skus<-ifelse(is.na(BM_Store_pc$store_number_of_skus),mean(BM_Store_pc$store_number_of_skus, na.rm=T),BM_Store_pc$store_number_of_skus)
+BM_Store_pc$sa_gender<-ifelse(is.na(BM_Store_pc$sa_gender),mean(BM_Store_pc$sa_gender, na.rm=T),BM_Store_pc$sa_gender)
+BM_Store_pc$sa_full_time<-ifelse(is.na(BM_Store_pc$sa_full_time),mean(BM_Store_pc$sa_full_time, na.rm=T),BM_Store_pc$sa_full_time)
+BM_Store_pc$sa_avg_years_of_exp<-ifelse(is.na(BM_Store_pc$sa_avg_years_of_exp),mean(BM_Store_pc$sa_avg_years_of_exp, na.rm=T),BM_Store_pc$sa_avg_years_of_exp)
+BM_Store_pc$sa_married<-ifelse(is.na(BM_Store_pc$sa_married),mean(BM_Store_pc$sa_married, na.rm=T),BM_Store_pc$sa_married)
+BM_Store_pc$sa_avg_rate_of_pay<-ifelse(is.na(BM_Store_pc$sa_avg_rate_of_pay),mean(BM_Store_pc$sa_avg_rate_of_pay, na.rm=T),BM_Store_pc$sa_avg_rate_of_pay)
+BM_Store_pc$sa_dependent<-ifelse(is.na(BM_Store_pc$sa_dependent),mean(BM_Store_pc$sa_dependent, na.rm=T),BM_Store_pc$sa_dependent)
+BM_Store_pc$sales_volume_group<-ifelse(is.na(BM_Store_pc$sales_volume_group),mean(BM_Store_pc$sales_volume_group, na.rm=T),BM_Store_pc$sales_volume_group)
+stargazer(BM_Store_pc,type="text",digits=2,titile="Modelpc Results ")
+```
+#====
+Online Data
+#====
+```{r}
+
+stargazer(Online_Store_pc, type='text', title='descriptive analysis',
+          digits=2, median=TRUE, iqr=TRUE)
+
+# Replace missing value with mean
+Online_Store_pc$avg_female[is.na(Online_Store_pc$avg_female)] <- 0.57
+Online_Store_pc$avg_age[is.na(Online_Store_pc$avg_age)] <- 4.32
+Online_Store_pc$avg_income[is.na(Online_Store_pc$avg_income)] <-5.25
+Online_Store_pc$avg_homeowner[is.na(Online_Store_pc$avg_homeowner)] <- 0.66
+Online_Store_pc$avg_residency[is.na(Online_Store_pc$avg_residency)] <- 7.03
+Online_Store_pc$avg_childowner[is.na(Online_Store_pc$avg_childowner)] <- 0.42
+
+
+# set dummy variable for time group
+#       time_group =0 : before policy change (2013.04.01-2013.09.30)
+#       time_group =1 : after policy change(2013.10.01 - 2014.03.01)
+# set dummy variable for store group
+#       store_group = 0 : without policy change(store number=10)
+#       store_group = 1 : with policy change(store number =2 or 6 )
+
+Online_Store_pc $ policy_change <- ifelse(Online_Store_pc $ store_number %in% c(2,6), 1, 0)
+Online_Store_pc $ month_group <- ifelse(Online_Store_pc $ month_dummy %in% c(4,5,6,7,8,9),0,1)
+
+### Explore data
+ggplot(Online_Store_pc,aes(salesvalue)) + geom_histogram(color='green')
+ggplot(Online_Store_pc,aes(log(salesvalue))) + geom_histogram(color='green')
+
+is.factor(Online_Store_pc$product_category)
+table(Online_Store_pc$product_category)
+Online_Store_pc$pcfactor <- factor(Online_Store_pc$product_category, 
+                                              levels = c("5" ,"1", "2",  "3",  "4",  "6",  "7",  
+                                                         "8",  "9",  "10", "11", "12", "13", "14",
+                                                         "15", "16", "17","18", "19", "20",'21'))
+
+```
+##############
+# Online Sales Value
+##############
+```{r}
+Online_Store_pc$lnsalesvalue <- log(Online_Store_pc$salesvalue+1)
+Online_Store_pc$lnreturnvalue<- log(Online_Store_pc$returnvalue+1)
+Online_Store_pc$lnsalesquantity <- log(Online_Store_pc$salesquantity+1)
+Online_Store_pc$lnreturnquantity <- log(Online_Store_pc$returnquantity+1)
+
+
+lm_online_plevel_sv_1 = lm(lnsalesvalue ~ month_group*policy_change + 
+                             avg_female + avg_age + avg_income + avg_homeowner + avg_residency +avg_childowner + pcfactor,
+                           data = Online_Store_pc)
+
+step<-stepAIC(lm_online_plevel_sv_1, direction='both')
+step$anova
+
+lm_online_plevel_sv_2 = lm(lnsalesvalue ~ month_group*policy_change + 
+                             avg_female + avg_age + avg_income + avg_homeowner +avg_childowner + pcfactor, 
+                           data = Online_Store_pc)
+
+anova(lm_online_plevel_sv_1,lm_online_plevel_sv_2, test='Chisq')
+# model with avg_trsidency is better (lm_online_plevel_sv_1)
+
+lm_online_plevel_sv_3 = lm(lnsalesvalue ~ month_group*policy_change + 
+                             avg_female + avg_age + avg_income + avg_homeowner + avg_childowner + avg_residency + pcfactor,
+                           data = Online_Store_pc)
+
+stargazer(lm_online_plevel_sv_3, type='text',title='regression result',
+          column.labels = 'lm1a', df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+# the impact of return policy on lnsalesvalue is insignificant 
+
+##### Heteroskedasticity 
+gqtest(lm_online_plevel_sv_3) # significant 
+bptest(lm_online_plevel_sv_3) # significant
+
+HWrobstder5a <- sqrt(diag(vcovHC(lm_online_plevel_sv_3, type='HC1')))
+
+stargazer(lm_online_plevel_sv_3, type='text',title='Online_Salesvalue', se=list(HWrobstder5a),
+          column.labels = c("HW-Robust SE"), df=FALSE, digits=2, 
+          star.cutoffs = c(0.05,0.01,0.001))
+
+# the impact of return policy on lnsalevalue is insignificant 
+
+
+#### Marginal Effect
+meffect_online_plevel_sv = ggpredict(lm_online_plevel_sv_3, terms=c('month_group', 'policy_change'))
+ggplot(meffect_online_plevel_sv, aes(x, predicted, color=group)) + geom_line(size=1.3) + 
+        xlab('Time') + ylab('ln(Sales Value)') + 
+        scale_color_discrete(labels=c('Policy changed', 'Policy unchanged'))+ 
+        scale_x_continuous(breaks = c(0,1), labels = c('Before policy change', 'After policy change'))
+```
+
+#######
+# Online Salesquantity
+#######
+```{r}
+####  poisson model
+poisson_online_plevel_sq_1 = glm(salesquantity ~ month_group*policy_change + 
+                                   avg_female + avg_age + avg_income + avg_homeowner + avg_residency + avg_childowner + pcfactor, 
+                                 data = Online_Store_pc, family = 'poisson')
+
+poisson_online_plevel_sq_2 = glm(salesquantity ~ month_group*policy_change + 
+                                   avg_female + avg_age + avg_income + avg_homeowner + avg_childowner + pcfactor, 
+                                 data = Online_Store_pc, family = 'poisson')
+
+anova(poisson_online_plevel_sq_1, poisson_online_plevel_sq_2, test='Chisq')
+# significant ==> model with avg_residency is better(poisson_online_plevel_sq_1)
+
+stargazer(poisson_online_plevel_sq_1, type='text', title='Online_salesquantity', column.labels ='poisson5a',
+          apply.coef = exp, t.auto=F, p.auto=F,
+          digits=2, df=FALSE, star.cutoffs=c(0.05,0.01,0.001) )
+# with return policy, sales quantity will decrease 2%.
+
+
+## model fit
+poisson_online_plevel_sq_1a <- glm(salesquantity~1, data=Online_Store_pc, family='poisson')
+lrtest(poisson_online_plevel_sq_1,poisson_online_plevel_sq_1a)
+# significant ==> poisson model does not fit the data
+
+
+### Heteroskedasticity
+bptest(poisson_online_plevel_sq_1)
+gqtest(poisson_online_plevel_sq_1)
+# significant ==> has heteroskedasticity
+
+HWrobstder5b <- sqrt(diag(vcovHC(poisson_online_plevel_sq_1, type='HC1')))
+
+stargazer(poisson_online_plevel_sq_1, type='text', title='Online_salesquantity', 
+          column.labels ='poisson_online_plevel_sq_1-IRR-robust SE',
+          apply.coef = exp, t.auto=F, p.auto=F,
+          se=list(HWrobstder5b),
+          digits=2, df=FALSE, star.cutoffs=c(0.05,0.01,0.001) )
+
+# return policy change, sales quantity will decrease by 2%.
+
+
+
+####  negative binomial model
+negbi_online_plevel_sq_1 = glm.nb(salesquantity ~ month_group*policy_change + 
+                                    avg_female + avg_age + avg_income + avg_homeowner + avg_residency + avg_childowner + pcfactor, 
+                  data = Online_Store_pc) 
+
+negbi_online_plevel_sq_2 = glm.nb(salesquantity ~ month_group*policy_change + 
+                                    avg_female + avg_age + avg_income + avg_homeowner + avg_childowner + pcfactor, 
+                  data = Online_Store_pc) 
+
+lrtest(negbi_online_plevel_sq_1, negbi_online_plevel_sq_2)
+# insignificant ==> without avg_residency is better (negbi_online_plevel_sq_2)
+
+stargazer(negbi_online_plevel_sq_2,  title="Online_salesquantity", type="text", column.labels=c("negbi_online_plevel_sq_2-IRR"),
+          apply.coef = exp, t.auto=F, p.auto=F,
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+# return policy has no significant change on sales quantity
+
+
+### Heterosckedasticity
+gqtest(negbi_online_plevel_sq_2)    #significant
+bptest(negbi_online_plevel_sq_2)    #significant
+
+HWrobstder5c<- sqrt(diag(vcovHC(negbi_online_plevel_sq_2, type='HC1')))
+
+stargazer(negbi_online_plevel_sq_2,  title="Online_Salesquantity", type="text", column.labels=c("negbi_online_plevel_sq_2-IRR-robust SE"),
+          apply.coef = exp, t.auto=F, p.auto=F,
+          se=list(HWrobstder5c),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+# interaction still insignificant ==> return policy has no significant change on sales quantity
+
+
+### MODEL FIT
+negbi_online_plevel_sq_2a <- glm.nb(salesquantity~1, data=Online_Store_pc)
+lrtest(negbi_online_plevel_sq_2, negbi_online_plevel_sq_2a)  #significant==> negative binomial model fits the data
+
+
+
+######## CHOOSE MODEL BETWEEN POISSON & NEGATIVE BINOMIAL
+lrtest(poisson_online_plevel_sq_1, negbi_online_plevel_sq_2)
+# significant ==> choose negative binomial 
+
+####### MARGINAL EFFECTS
+
+meffect_online_plevel_sq = ggpredict(negbi_online_plevel_sq_2, terms=c('month_group', 'policy_change'))
+ggplot(meffect_online_plevel_sq, aes(x, predicted, color=group)) + geom_line(size=1.3) + 
+        xlab('Time') + ylab('Sales Quantity') + 
+        scale_color_discrete(labels=c('Policy changed', 'Policy unchanged'))+ 
+        scale_x_continuous(breaks = c(0,1), labels = c('Before policy change', 'After policy change'))
+
+
+#===========
+#Conclusion: return policy change has no significant impact on online salesvalue and sales quantity
+#===========
+```
+
+
+
+############
+##  Online Return Value
+############
+```{r}
+#### linear regression
+lm_online_plevel_rv_1 = lm(lnreturnvalue ~ month_group*policy_change + 
+                           avg_female + avg_age + avg_income + avg_homeowner + avg_residency + avg_childowner + pcfactor, 
+                         data = Online_Store_pc)
+
+step <- stepAIC(lm_online_plevel_rv_1, direction='both')
+step$anova
+
+lm_online_plevel_rv_2 = lm(lnreturnvalue ~ month_group*policy_change + 
+                             lnsalesvalue+ avg_female + avg_age + avg_income + avg_homeowner + 
+                             avg_residency + avg_childowner + pcfactor, 
+                         data = Online_Store_pc)
+
+anova(lm_online_plevel_rv_1, lm_online_plevel_rv_2, test='Chisq') # significant, include lnsalesvalue (lm_online_plevel_rv_2)
+
+lm_online_plevel_rv_3 <- lm(lnreturnvalue ~ month_group*policy_change + 
+                              lnsalesvalue+ avg_female + avg_age + avg_income + avg_homeowner + avg_childowner + pcfactor, 
+                         data = Online_Store_pc)
+
+anova(lm_online_plevel_rv_2, lm_online_plevel_rv_3, test='Chisq') # insignificant  ==> without avg_residency is better(lm_online_plevel_rv_3)
+
+lm_online_plevel_rv_4 = lm(lnreturnvalue ~month_group*policy_change + 
+                             lnsalesvalue+ avg_female + avg_age + avg_income + avg_homeowner + pcfactor, 
+                         data = Online_Store_pc)
+
+anova(lm_online_plevel_rv_3, lm_online_plevel_rv_4, test='Chisq') # insignificant ==> without avg_childowner is better(lm_online_plevel_rv_4)
+
+
+
+#####
+gqtest(lm_online_plevel_rv_4)   #insignificant
+bptest(lm_online_plevel_rv_4)   # significant
+
+HWrobstder5d <- sqrt(diag(vcovHC(lm_online_plevel_rv_4, type='HC1')))
+
+stargazer(lm_online_plevel_rv_4, type='text',title='Online_Returnvalue', se=list(HWrobstder5d),
+          column.labels = c("HW-Robust SE"), df=FALSE, digits=2, 
+          star.cutoffs = c(0.05,0.01,0.001))
+# change of return policy will decrease online returnvalue by 20%  
+
+## Marginal Effects
+meffect_online_plevel_rv <- ggpredict(lm_online_plevel_rv_4, terms=c('month_group', 'policy_change'))
+ggplot(meffect_online_plevel_rv, aes(x, predicted, color=group)) + geom_line(size=1.3) + 
+        xlab('Time') + ylab('ln(Return Value)') + 
+        scale_color_discrete(labels=c('Policy changed', 'Policy unchanged'))+ 
+        scale_x_continuous(breaks = c(0,1), labels = c('Before policy change', 'After policy change'))
+```
+
+
+
+##########
+# Online returnquantity
+##########
+
+```{r}
+###### POISSON
+poisson_online_plevel_rq_1 = glm(returnquantity ~ month_group*policy_change + 
+                                 avg_female + avg_age + avg_income + avg_homeowner + avg_residency + avg_childowner + pcfactor,
+                               data = Online_Store_pc, family='poisson')
+
+
+poisson_online_plevel_rq_2 = glm(returnquantity ~  month_group*policy_change + 
+                                   salesquantity + avg_female + avg_age + avg_income + avg_homeowner + avg_residency + 
+                                   avg_childowner + pcfactor, 
+                               data = Online_Store_pc, family='poisson')
+
+anova(poisson_online_plevel_rq_1,poisson_online_plevel_rq_2, test='Chisq')  # significant ==> with salesquantity is better(poisson5e)
+
+poisson_online_plevel_rq_3 = glm(returnquantity ~ month_group*policy_change +
+                                    lnsalesquantity+ avg_female + avg_age + avg_income + avg_homeowner + avg_residency +
+                                    avg_childowner + pcfactor, 
+                               data = Online_Store_pc, family='poisson')
+
+AIC(poisson_online_plevel_rq_2,poisson_online_plevel_rq_3)
+BIC(poisson_online_plevel_rq_2,poisson_online_plevel_rq_3)  # lnsalesquantity is better(poisson5f)
+
+
+
+stargazer(poisson_online_plevel_rq_3, type='text', title='Online_returnquantity', column.labels = 'poisson-IRR',
+          apply.coef = exp, t.auto = F, p.auto = F,
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+# return policy change will decrease return quantity by 15%.
+
+### HETEROSKEDASTICITY
+bptest(poisson_online_plevel_rq_3)   # significant
+gqtest(poisson_online_plevel_rq_3)   # significant
+
+HWrobstder5e <- sqrt(diag(vcov(poisson_online_plevel_rq_3, type='HC1')))
+
+stargazer(poisson_online_plevel_rq_3, type='text', title='returnquantity-poisson-IRR', 
+          apply.coef = exp, t.auto = F, p.auto = F,
+          se=list(HWrobstder5e), column.labels = c("HW-Robust SE"), 
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+# ===> change of return policy decrease return quantity by 15% 
+
+
+#### MODEL FIT
+poisson_online_plevel_rq_3a <- glm(returnquantity~1, data=Online_Store_pc,family='poisson')
+lrtest(poisson_online_plevel_rq_3, poisson_online_plevel_rq_3a)
+# significant ==> the poisson model doe not fit the data
+
+
+
+######## NEGATICE BINOMIAL
+negbi_online_plevel_rq_1 = glm.nb(returnquantity ~ month_group*policy_change + 
+                                    avg_female + avg_age + avg_income + avg_homeowner + avg_residency +
+                                    avg_childowner + pcfactor,
+                                  data = Online_Store_pc)
+
+negbi_online_plevel_rq_2 = glm.nb(returnquantity ~ month_group*policy_change +
+                                    lnsalesquantity+ avg_female + avg_age + avg_income + avg_homeowner + 
+                                    avg_residency + avg_childowner + pcfactor,
+                                  data = Online_Store_pc)
+
+lrtest(negbi_online_plevel_rq_1, negbi_online_plevel_rq_2)
+# significant ==> with lnsalesquantity is better (negbi_online_plevel_rq_2)
+
+
+stargazer(negbi_online_plevel_rq_2, type='text', title='returnquantity-NB', column.labels = 'negative binomial-IRR',
+          apply.coef = exp, t.auto = F, p.auto = F,
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+# return policy change will decrease return quantity by 12%
+
+
+
+
+###### HETEROSKEDASTICITY
+gqtest(negbi_online_plevel_rq_2)  # significant 
+bptest(negbi_online_plevel_rq_2)  # significant
+
+HWrobstder3d <- sqrt(diag(vcov(negbi_online_plevel_rq_2, type='HC1')))
+
+stargazer(negbi_online_plevel_rq_2, type='text', title='Online_Returnquantity', 
+          apply.coef = exp, t.auto = F, p.auto = F,
+          se=list(HWrobstder3d), column.labels = c("HW-Robust SE"), 
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+#return policy change will decrease return quantity by 12%
+
+#### MODEL fit
+negbi_online_plevel_rq_2a <- glm.nb(returnquantity ~1, data = Online_Store_pc)
+
+lrtest(negbi_online_plevel_rq_2, negbi_online_plevel_rq_2a)   # significant, NB model fits the data
+
+###### CHOOSE MODEL
+lrtest(poisson_online_plevel_rq_3, negbi_online_plevel_rq_2) # significant, NB model is better
+
+
+#### Marginal Effects
+meffect_online_plevel_rq <- ggpredict(negbi_online_plevel_rq_2, terms=c('month_group', 'policy_change'))
+ggplot(meffect_online_plevel_rq, aes(x, predicted, color=group)) + geom_line(size=1.3) + 
+        xlab('Time') + ylab('Return Quantity') + 
+        scale_color_discrete(labels=c('Policy changed', 'Policy unchanged'))+ 
+        scale_x_continuous(breaks = c(0,1), labels = c('Before policy change', 'After policy change'))
+
+
+
+
+#=========
+# Conclusion: change of return policy will decrease online returnvalue by 20%,
+#                                     will decrease return quantity by 12%
+#=========
+```
+
+#
+##BM Sales Value
+#
+```{r}
+lm_bm_plevel_sv1 = lm(log(salesvalue+1) ~ 
+                        avg_female + avg_age + avg_income + avg_homeowner + 
+                        avg_residency + avg_childowner + store_average_price + 
+                        log(store_number_of_skus) + sa_gender + sa_full_time + 
+                        sa_avg_years_of_exp + sa_married + sa_avg_rate_of_pay + 
+                        store_average_price + sa_dependent + 
+                        policy_change*month_group, 
+                      data = BM_Store_pc)    
+
+ 
+lm_bm_plevel_sv2 = lm(log(salesvalue+1) ~ 
+                        avg_female + product_category + avg_age + avg_income + 
+                        avg_homeowner + avg_residency + avg_childowner + 
+                        store_average_price + log(store_number_of_skus) + sa_gender + 
+                        sa_full_time + sa_avg_years_of_exp + sa_married + 
+                        sa_avg_rate_of_pay + store_average_price + sa_dependent + 
+                        policy_change*month_group, 
+                      data = BM_Store_pc)    
+
+lrtest(lm_bm_plevel_sv1,lm_bm_plevel_sv2) # model with product category is better.
+
+lm_bm_plevel_sv3 = lm(log(salesvalue+1) ~ 
+                        avg_female + pcfactor + avg_age + avg_income + 
+                        avg_homeowner + avg_residency + avg_childowner + 
+                        store_average_price + log(store_number_of_skus) + 
+                        sa_gender + sa_full_time + sa_avg_years_of_exp + 
+                        sa_married + sa_avg_rate_of_pay + store_average_price + 
+                        sa_dependent + 
+                        policy_change*month_group, 
+                      data = BM_Store_pc)    
+
+AIC(lm_bm_plevel_sv2,lm_bm_plevel_sv3)
+BIC(lm_bm_plevel_sv2,lm_bm_plevel_sv3)# factor product category is better.
+
+
+gqtest(lm_bm_plevel_sv3) 
+bptest(lm_bm_plevel_sv3) #Significant Breusch-Pagan test  indicates heteroscedasticity. 
+HWrobstder <- sqrt(diag(vcovHC(lm_bm_plevel_sv3, type="HC1")))
+
+stargazer(lm_bm_plevel_sv3, lm_bm_plevel_sv3,  
+          se=list(NULL, HWrobstder), t.auto=F, p.auto = F,
+          title="Product Catergory Salesvalue Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+```
+#==
+##BM Sales Quantity
+#==
+```{r}
+negbi_bm_plevel_sq_1 = glm.nb(salesquantity ~ 
+                              avg_female + pcfactor + avg_age + avg_income + 
+                              avg_homeowner + avg_residency + avg_childowner + 
+                              store_average_price + store_number_of_skus + sa_gender + 
+                              sa_full_time + sa_avg_years_of_exp + sa_married + 
+                              sa_avg_rate_of_pay + store_average_price +
+                              sa_dependent + 
+                              policy_change*month_group, 
+                            data = BM_Store_pc)
+
+negbi_bm_plevel_sq_2 = glm.nb(salesquantity ~ 
+                                avg_female + pcfactor + avg_age + avg_income + 
+                                avg_homeowner + avg_residency + avg_childowner + 
+                                store_average_price + log(store_number_of_skus) + sa_gender + 
+                                sa_full_time + sa_avg_years_of_exp + sa_married + sa_avg_rate_of_pay + store_average_price+
+                                sa_dependent + 
+                              policy_change*month_group, 
+                            data = BM_Store_pc)
+
+AIC(negbi_bm_plevel_sq_1,negbi_bm_plevel_sq_2)
+BIC(negbi_bm_plevel_sq_1,negbi_bm_plevel_sq_2)# log transfer store_number_of_skus is better, negbi_bm_plevel_sq_2 is better.
+
+
+negbi_bm_plevel_sq_2a <- glm.nb(salesquantity ~ 1, data=BM_Store_pc) 
+
+lrtest(negbi_bm_plevel_sq_2, negbi_bm_plevel_sq_2a)#signifcant, model has model fit.
+
+stargazer(negbi_bm_plevel_sq_2, negbi_bm_plevel_sq_2,
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Sales quantity pc Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001))
+```
+#==
+##BM Return Value
+#==
+```{r}
+lm_bm_plevel_rv_1 = lm(log(returnvalue+1) ~ 
+                         avg_female + pcfactor + avg_age + avg_income + avg_homeowner + 
+                         avg_residency + avg_childowner + store_average_price + 
+                         log(store_number_of_skus) + sa_gender + sa_full_time + 
+                         sa_avg_years_of_exp + sa_married + sa_avg_rate_of_pay + 
+                         store_average_price + sa_dependent + 
+                         policy_change*month_group, 
+                       data = BM_Store_pc) 
+
+gqtest(lm_bm_plevel_rv_1) #Significant indicates heteroscedasticity.
+bptest(lm_bm_plevel_rv_1) #Significant Breusch-Pagan test  indicates heteroscedasticity. 
+HWrobstder <- sqrt(diag(vcovHC(lm_bm_plevel_rv_1, type="HC1")))
+
+stargazer(lm_bm_plevel_rv_1, lm_bm_plevel_rv_1,  
+          se=list(NULL, HWrobstder), t.auto=F, p.auto = F,
+          title="Product Catergory returnvalue Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+```
+#==
+##BM Return Quantity
+#==
+```{r}
+negbi_bm_plevel_rq_1 = glm.nb(returnquantity ~ 
+                                avg_female + pcfactor + avg_age + avg_income + 
+                                avg_homeowner + avg_residency + avg_childowner + 
+                                store_average_price + log(store_number_of_skus) + 
+                                sa_gender + sa_full_time + sa_avg_years_of_exp + 
+                                sa_married + sa_avg_rate_of_pay + store_average_price + 
+                                sa_dependent + 
+                                policy_change*month_group, 
+                              data = BM_Store_pc)
+
+negbi_bm_plevel_rq_1a <- glm.nb(returnquantity ~ 1, data=BM_Store_pc) 
+lrtest(negbi_bm_plevel_rq_1, negbi_bm_plevel_rq_1a) # significant, model has model fit.
+
+gqtest(negbi_bm_plevel_rq_1) 
+bptest(negbi_bm_plevel_rq_1) #Significant Breusch-Pagan test  indicates heteroscedasticity.
+
+HWrobstder <- sqrt(diag(vcovHC(negbi_bm_plevel_rq_1, type="HC1")))
+stargazer(negbi_bm_plevel_rq_1, negbi_bm_plevel_rq_1,  
+          se=list(NULL, HWrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+```
+
+
+#----------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+##Question 6: impact on each product category in online & BM channels 
+
+
+
+#----------------------------------------------------------------------------------------------------------------------------------------
+
+#=========
+## Product Category Impact: Online
+#=========
+
+#==
+# Online Sales value
+#==
+```{r}
+
+### Multicollinearity 
+
+df_onlinepc_sv_1 = Online_Store_pc[c('lnsalesvalue','policy_change','month_group', 'avg_female','avg_age','avg_income','avg_homeowner','avg_residency','avg_childowner')]
+cor(df_onlinepc_sv_1)
+
+df_onlinepc_sv_2 = Online_Store_pc[c('policy_change','month_group','product_category', 'avg_female','avg_age','avg_income','avg_homeowner','avg_residency','avg_childowner')]
+cor(df_onlinepc_sv_2)
+
+###### Linear Regression
+lm_onlinepc_sv_1 = lm(lnsalesvalue ~ 
+                        month_group*policy_change*pcfactor + avg_female + avg_age + avg_income + 
+                        avg_homeowner + avg_residency + avg_childowner, 
+                      data = Online_Store_pc
+                      )
+
+
+step<- stepAIC(lm_onlinepc_sv_1, direction='both')
+step$anova
+
+lm_onlinepc_sv_2 = lm(lnsalesvalue ~ month_group*policy_change*pcfactor + avg_female + avg_age + 
+                        avg_income + avg_homeowner  + avg_childowner, 
+                      data = Online_Store_pc
+                      )
+
+anova(lm_onlinepc_sv_1, lm_onlinepc_sv_2, test='Chisq')
+# insignificant, without avg_residency is better(lm_onlinepc_sv_2)
+
+stargazer(lm_onlinepc_sv_2, 
+          type='text',title='regression result',
+          column.labels = 'lm6B', df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+#### Heteroskedasticity
+
+bptest(lm_onlinepc_sv_2)  #significant 
+gqtest(lm_onlinepc_sv_2)  # significant
+
+HWrobstder6a <- sqrt(diag(vcovHC(lm_onlinepc_sv_2, type='HC1')))
+stargazer(lm_onlinepc_sv_2,lm_onlinepc_sv_2, type='text', title='Q6- Impact on Online sales value across products',
+          se=list(NULL, HWrobstder6a),
+          column.labels = c('Normal SE', 'HW-robust SE'), df=F, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+
+##### Marginal Effects
+meffect_onlinepc_sv = ggpredict(lm_onlinepc_sv_2, terms=c('month_group','policy_change','pcfactor'))
+
+ggplot(meffect_onlinepc_sv, aes(x,predicted, color=group)) + geom_line(size=1.3)+
+        xlab('Time') + ylab('ln(Online_Salesvalue)') + 
+        scale_color_discrete(labels=c('Policy changed', 'Policy unchanged'))+ 
+        scale_x_continuous(breaks = c(0,1), labels = c('Befoct', 'Aftoct'))+
+        facet_wrap(~facet,ncol=4)
+
+
+
+online_salesvalue_pc <- list()
+for (n in 1:21) {
+        online_salesvalue_pc[[n]] <- subset(Online_Store_pc, Online_Store_pc$pcfactor==n) 
+}
+
+model_online_salesvalue_pc<-list()
+for (m in c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,20,21)) {
+        model_online_salesvalue_pc[[m]] <- lm( 
+                lnsalesvalue ~ month_group*policy_change
+                + avg_female 
+                + avg_age 
+                + avg_income 
+                + avg_homeowner 
+                + avg_childowner 
+                , data=online_salesvalue_pc[[m]] 
+        )
+}
+
+
+
+for (n in c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,20,21)) {
+        stargazer(model_online_salesvalue_pc[[n]],type="text",digits=2,titile=paste("model_pc",n,"Results"))
+}
+
+```
+
+########
+# Online Sales Quantity
+########
+```{r}
+stargazer(Online_Store_pc, type='text', title='descriptive analysis',
+          digits=2, median=TRUE, iqr=TRUE)
+
+### Multicollinearity
+df_onlinepc_sq_1 = Online_Store_pc[c('salesquantity','policy_change','month_group', 'avg_female','avg_age','avg_income',
+                            'avg_homeowner','avg_residency','avg_childowner')]
+cor(df_onlinepc_sq_1)
+
+
+############# Poisson
+poisson_onlinepc_sq_1 = glm(salesquantity ~ month_group*policy_change*pcfactor + 
+                              avg_female + avg_age + avg_income + avg_homeowner + avg_childowner, 
+                            data = Online_Store_pc, family='poisson')
+
+poisson_onlinepc_sq_2 <- glm(salesquantity ~ month_group*policy_change*pcfactor + avg_female + avg_age + avg_income + 
+                         avg_homeowner + avg_childowner + avg_residency, 
+                            data = Online_Store_pc, family='poisson')
+
+anova(poisson_onlinepc_sq_1, poisson_onlinepc_sq_2, test='Chisq')
+# significant ==> with avg_residency is better(poisson_onlinepc_sq_2)
+
+
+stargazer(poisson_onlinepc_sq_2, type='text', title='Q6-salesquantity across products', 
+          column.labels =c('Poisson-IRR'),
+          apply.coef = exp, t.auto = F, p.auto = F,
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+
+#### Heteroskedasticity
+bptest(poisson_onlinepc_sq_2)  #significant 
+gqtest(poisson_onlinepc_sq_2)  # significant
+
+HWrobstder6b <- sqrt(diag(vcovHC(poisson_onlinepc_sq_2, type='HC1')))
+stargazer(poisson_onlinepc_sq_2,poisson_onlinepc_sq_2, type='text', title='Q6- Impact on Online sales quantity across products',
+          apply.coef = exp, t.auto = F, p.auto = F,
+          se=list(NULL, HWrobstder6b),
+          column.labels = c('Normal SE', 'HW-robust SE'), df=F, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+
+##### Model Fit
+poisson_onlinepc_sq_2a <- glm(salesquantity ~ 1, data=Online_Store_pc, family='poisson')
+lrtest(poisson_onlinepc_sq_2, poisson_onlinepc_sq_2a)
+# significant ==> poisson does not fit the model
+
+
+
+########### Negative Binomial
+
+negbi_onlinepc_sq_1 = glm.nb(salesquantity ~ month_group*policy_change*pcfactor + 
+                               avg_female + avg_age + avg_income + avg_homeowner + avg_childowner + avg_residency, 
+                             dat = Online_Store_pc)
+
+negbi_onlinepc_sq_2 = glm.nb(salesquantity ~ month_group*policy_change*pcfactor + 
+                               avg_female + avg_age + avg_income + avg_homeowner + avg_childowner, 
+                             dat = Online_Store_pc)
+lrtest(negbi_onlinepc_sq_1, negbi_onlinepc_sq_2) # insignificant without avg_residency is better(negbi_onlinepc_sq_1)
+
+### Heteroskedasticity
+bptest(negbi_onlinepc_sq_1)  #significant 
+gqtest(negbi_onlinepc_sq_1)  # significant
+
+HWrobstder6c <- sqrt(diag(vcovHC(negbi_onlinepc_sq_1, type='HC1')))
+stargazer(negbi_onlinepc_sq_1,negbi_onlinepc_sq_1, type='text', title='Q6- Impact on Online sales quantity across products-NB',
+          apply.coef = exp, t.auto = F, p.auto = F,
+          se=list(NULL, HWrobstder6c),
+          column.labels = c('Normal SE', 'HW-robust SE'), df=F, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+
+#### Model Fit
+negbi_onlinepc_sq_1a <- glm.nb(salesquantity~1, data=Online_Store_pc)
+lrtest(negbi_onlinepc_sq_1, negbi_onlinepc_sq_1a)
+# significant, NB fit the model
+
+#### Choose model (poisson & negative binomial)
+lrtest(negbi_onlinepc_sq_1, poisson_onlinepc_sq_2)
+# significant ==> NB is better
+
+
+##### Marginal Effects
+meffect_onlinepc_sq <- ggpredict(negbi_onlinepc_sq_1, terms=c('month_group','policy_change','pcfactor'))
+
+ggplot(meffect_onlinepc_sq, aes(x,predicted, color=group)) + geom_line(size=1.3)+
+        xlab('Time') + ylab('Online_SalesQuantity') + 
+        scale_color_discrete(labels=c('Policy changed', 'Policy unchanged'))+ 
+        scale_x_continuous(breaks = c(0,1), labels = c('BefOct', 'AftOct'))+
+        facet_wrap(~facet,ncol=4)
+
+
+
+online_salesquantity_pc <- list()
+for (n in c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,20,21)) {
+        online_salesquantity_pc[[n]] <- subset(Online_Store_pc, Online_Store_pc$pcfactor==n) 
+}
+
+model_online_salesquantity_pc<-list()
+for (m in c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,20,21)) {
+        model_online_salesquantity_pc[[m]] <- glm.nb( 
+                salesquantity ~ month_group*policy_change
+                + avg_female 
+                + avg_age 
+                + avg_income 
+                + avg_homeowner 
+                + avg_childowner
+                , data=online_salesquantity_pc[[m]] 
+        )
+}
+
+for (n in c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,20,21)) {
+        stargazer(model_online_salesquantity_pc[[n]],type="text",titile=paste("model_online_salesquantity_pc",n,"Results"),
+                  apply.coef = exp, t.auto = F, p.auto = F,
+                  digits=2,df=FALSE, star.cutoffs = c(0.05,0.01,0.001) )
+}
+
+stargazer(model_online_salesquantity_pc[[7]],type="text")
+```
+
+
+########
+# Online Return value
+########
+```{r}
+stargazer(Online_Store_pc, type='text', title='descriptive analysis',
+          digits=2, median=TRUE, iqr=TRUE)
+
+### Explore data
+ggplot(Online_Store_pc,aes(returnvalue)) + geom_histogram(color='green')
+ggplot(Online_Store_pc,aes(log(returnvalue))) + geom_histogram(color='green')
+Online_Store_pc$lnreturnvalue <- log(Online_Store_pc$returnvalue+1)
+Online_Store_pc$lnsalesquantity <- log(Online_Store_pc$salesquantity+1.1)
+
+
+###### Linear Regression
+lm_onlinepc_rv_1 = lm(lnreturnvalue ~ month_group*policy_change*pcfactor + 
+                        avg_female + avg_age + avg_income + avg_homeowner + avg_residency + avg_childowner, 
+                      data = Online_Store_pc)
+
+lm_onlinepc_rv_2 = lm(lnreturnvalue ~ month_group*policy_change*pcfactor + 
+                        avg_female + avg_age + avg_income + avg_homeowner  + avg_childowner, 
+                      data = Online_Store_pc)
+
+anova(lm_onlinepc_rv_1, lm_onlinepc_rv_2, test='Chisq')
+# insignificant, without avg_residency is better(lm_onlinepc_rv_1)
+lm_onlinepc_rv_3 = lm(lnreturnvalue ~ month_group*policy_change*pcfactor + 
+                        avg_female + avg_age + avg_income + avg_homeowner  + avg_childowner + lnsalesvalue, 
+                      data = Online_Store_pc)
+
+anova(lm_onlinepc_rv_1, lm_onlinepc_rv_3, test='Chisq') # withlnsalesvalue is better (lm_onlinepc_rv_3)
+stargazer(lm_onlinepc_rv_3, type='text',title='regression result',
+          column.labels = 'lm6e', df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+#### Heteroskedasticity
+
+bptest(lm_onlinepc_rv_3)  #significant 
+gqtest(lm_onlinepc_rv_3)  # insignificant
+
+HWrobstder6d <- sqrt(diag(vcovHC(lm_onlinepc_rv_3, type='HC1')))
+stargazer(lm_onlinepc_rv_3,lm_onlinepc_rv_3, type='text', title='Q6- Impact on Online return value across products',
+          se=list(NULL, HWrobstder6d),
+          column.labels = c('Normal SE', 'HW-robust SE'), df=F, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+
+##### Marginal Effects
+meffec_onlinepc_rv = ggpredict(lm_onlinepc_rv_3, terms=c('month_group','policy_change','pcfactor'))
+
+ggplot(meffec_onlinepc_rv, aes(x,predicted, color=group)) + geom_line(size=1.3)+
+        xlab('Time') + ylab('ln(Online_Returnvalue)') + 
+        scale_color_discrete(labels=c('Policy changed', 'Policy unchanged'))+ 
+        scale_x_continuous(breaks = c(0,1), labels = c('BefOct', 'AftOct'))+
+        facet_wrap(~facet,ncol=4)
+
+
+
+online_returnvalue_pc <- list()
+for (n in 1:21) {
+        online_returnvalue_pc[[n]] <- subset(Online_Store_pc, Online_Store_pc$pcfactor==n) 
+}
+
+model_online_returnvalue_pc<-list()
+for (m in c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,20,21)) {
+        model_online_returnvalue_pc[[m]] <- lm( 
+                lnreturnvalue ~ month_group*policy_change
+                + avg_female 
+                + avg_age 
+                + avg_income 
+                + avg_homeowner 
+                + avg_childowner 
+                + lnsalesvalue
+                , data=online_returnvalue_pc[[m]] 
+        )
+}
+
+
+
+for (n in c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,20,21)) {
+        stargazer(model_online_returnvalue_pc[[n]],type="text",digits=2,titile=paste("model_return_value_pc",n,"Results"))
+}
+```
+
+
+########
+# Online Return Quantity
+########
+```{r}
+stargazer(Online_Store_pc, type='text', title='descriptive analysis',
+          digits=2, median=TRUE, iqr=TRUE)
+
+### Multicollinearity
+df_onlinepc_rq = Online_Store_pc[c('salesquantity','policy_change','month_group', 'avg_female','avg_age','avg_income',
+                            'avg_homeowner','avg_residency','avg_childowner')]
+cor(df_onlinepc_rq)
+
+
+############# Poisson
+poisson_onlinepc_rq_1 = glm(returnquantity ~ month_group*policy_change*pcfactor + 
+                              avg_female + avg_age + avg_income + avg_homeowner + avg_childowner, 
+                            data = Online_Store_pc, family='poisson')
+
+poisson_onlinepc_rq_2 <- glm(returnquantity ~ month_group*policy_change*pcfactor + 
+                               avg_female + avg_age + avg_income + avg_homeowner + avg_childowner + avg_residency, 
+                            data = Online_Store_pc, family='poisson')
+
+lrtest(poisson_onlinepc_rq_1, poisson_onlinepc_rq_2) 
+# significant ==> with avg_residency is better(poisson_onlinepc_rq_2)
+
+poisson_onlinepc_rq_3 = glm(returnquantity ~ month_group*policy_change*pcfactor + 
+                              avg_female + avg_age + avg_income + avg_homeowner + avg_childowner + avg_residency + lnsalesquantity, 
+                            data = Online_Store_pc, family='poisson')
+
+lrtest(poisson_onlinepc_rq_3, poisson_onlinepc_rq_2) # significant ==> with log(salesquantity+1) is better(poisson_onlinepc_rq_3)
+
+stargazer(poisson_onlinepc_rq_3, type='text', title='Q6-returnquantity across products', 
+          column.labels =c('Poisson-IRR'),
+          apply.coef = exp, t.auto = F, p.auto = F,
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+
+#### Heteroskedasticity
+bptest(poisson_onlinepc_rq_3)  #significant 
+gqtest(poisson_onlinepc_rq_3)  # significant
+
+HWrobstder6f <- sqrt(diag(vcovHC(poisson_onlinepc_rq_3, type='HC1')))
+stargazer(poisson_onlinepc_rq_3,poisson_onlinepc_rq_3, type='text', title='Q6- Impact on Online return quantity across products',
+          apply.coef = exp, t.auto = F, p.auto = F,
+          se=list(NULL, HWrobstder6f),
+          column.labels = c('Normal SE', 'HW-robust SE'), df=F, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+
+##### Model Fit
+poisson_onlinepc_rq_3a <- glm(salesquantity ~ 1, data=Online_Store_pc, family='poisson')
+lrtest(poisson_onlinepc_rq_3, poisson_onlinepc_rq_3a)
+# significant ==> poisson does not fit the model
+
+
+
+########### Negative Binomial
+
+negbi_onlinepc_rq_1 = glm.nb(returnquantity ~ month_group*policy_change*pcfactor + 
+                               avg_female + avg_age + avg_income + avg_homeowner + avg_childowner + avg_residency, 
+                             data = Online_Store_pc)
+
+negbi_onlinepc_rq_2 <- glm.nb(returnquantity ~ month_group*policy_change*pcfactor + 
+                                avg_female + avg_age + avg_income + avg_homeowner + avg_childowner,
+                             data = Online_Store_pc)
+
+lrtest(negbi_onlinepc_rq_1, negbi_onlinepc_rq_2) # insignificant without avg_residency is better(negbi_onlinepc_rq_1)
+
+negbi_onlinepc_rq_3 = glm.nb(returnquantity ~  month_group*policy_change*pcfactor + 
+                               avg_female + avg_age + avg_income + avg_homeowner + avg_childowner + lnsalesquantity, 
+                             data = Online_Store_pc)
+
+lrtest(negbi_onlinepc_rq_1, negbi_onlinepc_rq_3) # significant ==> with log(salesquantity+1) is better (negbi_onlinepc_rq_3)
+
+
+
+### Heteroskedasticity
+bptest(negbi_onlinepc_rq_3)  #significant 
+gqtest(negbi_onlinepc_rq_3)  # significant
+
+HWrobstder6g <- sqrt(diag(vcovHC(negbi_onlinepc_rq_3, type='HC1')))
+stargazer(negbi_onlinepc_rq_3,negbi_onlinepc_rq_3, type='text', title='Q6- Impact on Online return quantity across products-NB',
+          apply.coef = exp, t.auto = F, p.auto = F,
+          se=list(NULL, HWrobstder6g),
+          column.labels = c('Normal SE', 'HW-robust SE'), df=F, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+
+
+#### Model Fit
+negbi_onlinepc_rq_3a <- glm.nb(returnquantity~1, data=Online_Store_pc)
+lrtest(negbi_onlinepc_rq_3, negbi_onlinepc_rq_3a)
+# significant, NB fit the model
+
+#### Choose model (poisson & negative binomial)
+lrtest(negbi_onlinepc_rq_3a, poisson_onlinepc_rq_3)
+# significant ==> NB is better
+
+
+##### Marginal Effects
+
+meffect_onlinepc_rq <- ggpredict(negbi_onlinepc_rq_3, terms=c('month_group','policy_change','pcfactor'))
+
+ggplot(meffect_onlinepc_rq, aes(x,predicted, color=group)) + geom_line(size=1.3)+
+        xlab('Time') + ylab('Online_ReturnQuantity(predicted)') + 
+        scale_color_discrete(labels=c('Policy changed', 'Policy unchanged'))+ 
+        scale_x_continuous(breaks = c(0,1), labels = c('BefOct', 'AftOct'))+
+        facet_wrap(~facet,ncol=4)
+
+
+
+online_returnquantity_pc <- list()
+for (n in c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,20,21)) {
+        online_returnquantity_pc[[n]] <- subset(Online_Store_pc, Online_Store_pc$pcfactor==n) 
+}
+
+model_online_returnquantity_pc<-list()
+for (m in c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,20,21)) {
+        model_online_returnquantity_pc[[m]] <- glm.nb( 
+                returnquantity ~ month_group*policy_change
+                + avg_female 
+                + avg_age 
+                + avg_income 
+                + avg_homeowner 
+                + avg_childowner
+                + lnreturnquantity
+                , data=online_returnquantity_pc[[m]] 
+        )
+}
+
+
+for (n in c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,20,21)) {
+        stargazer(model_online_returnquantity_pc[[n]],type="text",titile=paste("model_online_returnquantity_pc",n,"Results"),
+                  apply.coef = exp, t.auto = F, p.auto = F, 
+                  digits=2,df=FALSE,star.cutoffs = c(0.05,0.01,0.001))
+}
+```
+
+
+
+#=========================
+##  Product Catergory Impact: BM Store Descriptive Analysis
+#=========================
+```{r}
+df_bm__pc = data.frame(BM_Store_pc$brand_number, BM_Store_pc$avg_female, BM_Store_pc$avg_age, BM_Store_pc$avg_income, 
+                       BM_Store_pc$avg_homeowner, BM_Store_pc$avg_residency, BM_Store_pc$avg_childowner, 
+                       BM_Store_pc$store_average_price, BM_Store_pc$store_number_of_skus, BM_Store_pc$sa_gender,
+                       BM_Store_pc$sa_full_time, BM_Store_pc$sa_avg_years_of_exp, BM_Store_pc$sa_married,  
+                       BM_Store_pc$sa_avg_rate_of_pay, BM_Store_pc$sa_dependent, BM_Store_pc$sales_volume_group, 
+                       BM_Store_pc$policy_change, BM_Store_pc$month_group, BM_Store_pc$product_category
+                       )
+
+    cor(df_bm__pc) #remove brand_number?
+    vifcor(df_bm__pc) #remove brand_number
+
+df_bm__pc_1 = data.frame(BM_Store_pc$avg_female, BM_Store_pc$avg_age, BM_Store_pc$avg_income, 
+                         BM_Store_pc$avg_homeowner, BM_Store_pc$avg_residency, BM_Store_pc$avg_childowner, 
+                         BM_Store_pc$store_average_price, BM_Store_pc$store_number_of_skus, BM_Store_pc$sa_gender,
+                         BM_Store_pc$sa_full_time, BM_Store_pc$sa_avg_years_of_exp, BM_Store_pc$sa_married,  
+                         BM_Store_pc$sa_avg_rate_of_pay, BM_Store_pc$sa_dependent, BM_Store_pc$sales_volume_group, 
+                         BM_Store_pc$policy_change, BM_Store_pc$month_group, BM_Store_pc$product_category
+                         )
+    
+    vifcor(df_bm__pc_1) ####all vif are below 3
+
+```  
+#==========================
+## Product Catergory Impact: Model Building --- Sales Value
+#==========================
+```{r}
+lm_bmpc_sv_1 = lm(log(salesvalue + 1) ~ 
+                    avg_female + avg_age + avg_income + avg_homeowner + avg_residency + 
+                    avg_childowner + store_average_price + log(store_number_of_skus) + 
+                    sa_gender + sa_full_time + sa_avg_years_of_exp + sa_married + sa_avg_rate_of_pay + 
+                    store_average_price + sa_dependent + 
+                    policy_change * pcfactor * month_group, 
+                  data = BM_Store_pc
+                  )    
+
+ 
+stargazer(lm_bmpc_sv_1,
+          type="text",digits=2,titile="BM Store PC Sales Value LM 1 Result"
+          )
+
+meffect_bmpc_sv = ggpredict(lm_bmpc_sv_1, terms=c("month_group","policy_change","pcfactor")) 
+meffect_bmpc_sv$lnpredicted<-log(meffect_bmpc_sv$predicted)
+
+ggplot(meffect_bmpc_sv,aes(x, lnpredicted, colour=group)) + geom_line(size=1.3) + 
+  xlab("Time") + ylab("Predicted Sales Value") +
+     labs(colour="policy_change") + 
+    theme(axis.title.x=element_blank())+facet_grid(~facet,scales='free') # for some product groups, the slope difference is quite obvious, while for some of them, it's very hard to identify through visual observation.
+
+ggplot(meffect_bmpc_sv,aes(x, lnpredicted, colour=group)) + geom_line(size=1.3) + 
+  xlab("Time") + ylab("Predicted Sales Value") +
+     labs(colour="policy_change") + 
+    theme(axis.title.x=element_blank())+facet_wrap(~facet,scales='free',ncol=5)
+#use for loop to subset the data per product catergory and investigate if the interaction coeffcient is significant.
+
+
+bmpc_list <- list()
+for (n in 1:21) {
+    bmpc_list[[n]] <- subset(BM_Store_pc, BM_Store_pc$pcfactor == n) 
+}
+
+x <- seq(21)
+x2 <- x[c(-3,-8,-11,-18,-19,-20,-17)]
+
+bmpc_sv_model <- list()
+for (m in x2) {
+    bmpc_sv_model[[m]] <- lm(log(salesvalue+1) ~ 
+                               avg_female + avg_age + avg_income + avg_homeowner + avg_residency + 
+                               avg_childowner + store_average_price + log(store_number_of_skus) + 
+                               sa_gender + sa_full_time + sa_avg_years_of_exp + sa_married + 
+                               sa_avg_rate_of_pay + store_average_price + sa_dependent + 
+                               policy_change * month_group, 
+                             data = bmpc_list[[m]] 
+                             )
+}
+
+for (n in x2) {
+    stargazer(bmpc_sv_model[[n]],
+              type="text",digits=2,titile=paste("Price Category Sales Value Model",n,"Results"))
+}
+
+```
+#=============================
+## Product Catergory Impact:Model Building --- Sales Quantity
+#=============================
+```{r}
+#poisson 
+poisson_bmpc_sq_1 = glm(salesquantity ~ 
+                          avg_female + avg_age + avg_income + avg_homeowner + 
+                          avg_residency + avg_childowner + store_average_price + 
+                          store_number_of_skus + sa_gender + sa_full_time + 
+                          sa_avg_years_of_exp + sa_married + sa_avg_rate_of_pay + 
+                          store_average_price + sa_dependent + 
+                          policy_change * pcfactor * month_group,  
+                        family="poisson", data = BM_Store_pc)
+
+stargazer(poisson_bmpc_sq_1, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001))
+
+
+poisson_bmpc_sq_1a <- glm(salesquantity~1, data=BM_Store_pc, family="poisson") 
+lrtest(poisson_bmpc_sq_1, poisson_bmpc_sq_1a)#statistically significant, model doesn't fit the data
+
+
+####Negative Binomial
+negbi_bmpc_sq_1 = glm.nb(salesquantity ~ 
+                           avg_female + avg_age + avg_income + avg_homeowner + 
+                           avg_residency + avg_childowner + store_average_price + 
+                           store_number_of_skus + sa_gender + sa_full_time + sa_avg_years_of_exp + 
+                           sa_married + sa_avg_rate_of_pay + store_average_price + sa_dependent + 
+                           policy_change * pcfactor * month_group, 
+                         data = BM_Store_pc
+                         )
+
+negbi_bmpc_sq_2 = glm.nb(salesquantity~ 
+                           avg_female + avg_age + avg_income + avg_homeowner + 
+                           avg_residency + avg_childowner + store_average_price + 
+                           log(store_number_of_skus) + sa_gender + sa_full_time + sa_avg_years_of_exp + 
+                           sa_married + sa_avg_rate_of_pay + store_average_price + sa_dependent + 
+                           policy_change * pcfactor * month_group, 
+                         data = BM_Store_pc
+                         )
+
+AIC(negbi_bmpc_sq_1,negbi_bmpc_sq_2)
+BIC(negbi_bmpc_sq_1,negbi_bmpc_sq_2) #negbin_pc_sales is better because smaller AIC and BIC score.
+
+gqtest(negbi_bmpc_sq_2) 
+bptest(negbi_bmpc_sq_2) #Significant Breusch-Pagan test  indicates heteroscedasticity. 
+
+HWrobstder <- sqrt(diag(vcovHC(negbi_bmpc_sq_2, type="HC1")))
+stargazer(negbi_bmpc_sq_2, negbi_bmpc_sq_2,  
+          se=list(NULL, HWrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+# Model fit assessment
+negbi_bmpc_sq_2a <- glm.nb(salesquantity ~ 1, data=BM_Store_pc) 
+lrtest(negbi_bmpc_sq_2, negbi_bmpc_sq_2a) # # Model fits the data because LR test statistics is  significant.
+
+#marginal effect 
+meffect_bmpc_sq<- ggpredict(negbi_bmpc_sq_2, terms=c("month_group","policy_change","pcfactor")) 
+
+ggplot(negbi_bmpc_sq_2,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+  xlab("Time") + ylab("Predicted Sales Quantity") +
+     labs(colour="policy_change") + 
+    theme(axis.title.x=element_blank())+facet_grid(~facet,scales='free') # for some product groups, the slope difference is quite obvious, while for some of them, it's very hard to identify through visual observation.
+
+ggplot(negbi_bmpc_sq_2,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+  xlab("Time") + ylab("Predicted Sales Quantity") +
+     labs(colour="policy_change") + 
+    theme(axis.title.x=element_blank())+facet_wrap(~facet,scales='free',ncol=5)
+#use for loop to subset the data per product catergory and investigate if the interaction coeffcient is significant.
+
+bmpc_sq_model <- list()
+
+for (m in x2) {
+    bmpc_sq_model[[m]] <- glm.nb(salesquantity ~ 
+                                  avg_female + avg_age + avg_income + avg_homeowner + avg_residency + 
+                                  avg_childowner + store_average_price + log(store_number_of_skus)+ 
+                                  sa_gender + sa_full_time + sa_avg_years_of_exp + sa_married + 
+                                  sa_avg_rate_of_pay + store_average_price + sa_dependent + 
+                                  policy_change * month_group, 
+                                data = bmpc_list[[m]] 
+                       )
+}
+
+for (n in x2) {
+    stargazer(bmpc_sq_model[[n]],type="text",digits=2,apply.coef = exp,titile=paste("Product Category Sales Quantity Model",n,"Results"))
+}
+
+```
+
+#============================
+## Product Catergory Impact:Model Building --- Return Value 
+#============================
+```{r}
+
+lm_bmpc_rv_1 = lm(log(returnvalue + 1) ~ 
+                    avg_female + avg_age + avg_income + avg_homeowner + avg_residency + 
+                    avg_childowner + store_average_price + log(store_number_of_skus) + 
+                    sa_gender + sa_full_time + sa_avg_years_of_exp + sa_married + 
+                    sa_avg_rate_of_pay + store_average_price + sa_dependent + 
+                    policy_change * pcfactor * month_group, 
+                  data = BM_Store_pc
+                  )    
+
+ 
+stargazer(lm_bmpc_rv_1,
+          type="text",digits=2,titile="BM PC Return Value Result"
+          )
+
+
+meffect_bmpc_rv <- ggpredict(lm_bmpc_rv_1, terms=c("month_group","policy_change","pcfactor")) 
+meffect_bmpc_rv$lnpredicted<-log(meffect_bmpc_rv$predicted)
+
+ggplot(meffect_bmpc_rv,aes(x, lnpredicted, colour=group)) + geom_line(size=1.3) + 
+  xlab("Time") + ylab("Predicted Return Value") +
+     labs(colour="policy_change") + 
+    theme(axis.title.x=element_blank())+facet_grid(~facet,scales='free') # for some product groups, the slope difference is quite obvious, while for some of them, it's very hard to identify through visual observation.
+
+ggplot(meffect_bmpc_rv,aes(x, lnpredicted, colour=group)) + geom_line(size=1.3) + 
+  xlab("Time") + ylab("Predicted Return Value") +
+     labs(colour="policy_change") + 
+    theme(axis.title.x=element_blank())+facet_wrap(~facet,scales='free',ncol=5)
+#use for loop to subset the data per product catergory and investigate if the interaction coeffcient is significant.
+
+
+
+bmpc_rv_model <- list()
+for (m in x2) {
+    bmpc_rv_model[[m]] <- lm(log(returnvalue+1) ~ 
+                               avg_female + avg_age + avg_income + avg_homeowner + avg_residency + 
+                               avg_childowner + store_average_price + log(store_number_of_skus) + 
+                               sa_gender + sa_full_time + sa_avg_years_of_exp + sa_married + 
+                               sa_avg_rate_of_pay + store_average_price + sa_dependent + 
+                               policy_change * month_group, 
+                             data = bmpc_list[[m]] 
+                       )
+}
+
+for (n in x2) {
+    stargazer(bmpc_rv_model[[n]],type="text",digits=2,titile=paste("BMPC Return Value Model",n,"Result"))
+}
+
+```
+#=============================
+## Product Catergory Impact:Model Building--return quantity as dependant variable
+#=============================
+```{r}
+
+#poisson 
+poisson_bmpc_rq_1 = glm(returnquantity ~ 
+                          avg_female + avg_age + avg_income + avg_homeowner + avg_residency + 
+                          avg_childowner + store_average_price + store_number_of_skus + sa_gender + 
+                          sa_full_time + sa_avg_years_of_exp + sa_married + sa_avg_rate_of_pay + 
+                          store_average_price + sa_dependent + 
+                          policy_change * pcfactor * month_group,  
+                        family="poisson",data = BM_Store_pc
+                        )
+
+stargazer(poisson_bmpc_rq_1, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="BMPC Return Quantity Result", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=4, star.cutoffs = c(0.05,0.01,0.001))
+
+
+poisson_bmpc_rq_1a <- glm(returnquantity~1, data=BM_Store_pc, family="poisson") 
+lrtest(poisson_bmpc_rq_1, poisson_bmpc_rq_1a)#statistically significant, model doesn't fit the data
+
+
+####Negative Binomial
+negbi_bmpc_rq_1 = glm.nb(returnquantity ~ 
+                           avg_female + avg_age + avg_income + avg_homeowner + avg_residency + 
+                           avg_childowner + store_average_price + store_number_of_skus + sa_gender + 
+                           sa_full_time + sa_avg_years_of_exp + sa_married + sa_avg_rate_of_pay + 
+                           store_average_price + sa_dependent + 
+                           policy_change * pcfactor * month_group, 
+                         data = BM_Store_pc
+                         )
+
+negbi_bmpc_rq_2 = glm.nb(returnquantity ~ 
+                           avg_female + avg_age + avg_income + avg_homeowner + avg_residency + 
+                           avg_childowner + store_average_price + log(store_number_of_skus) + sa_gender + 
+                           sa_full_time + sa_avg_years_of_exp + sa_married + sa_avg_rate_of_pay + 
+                           store_average_price + sa_dependent + 
+                           policy_change * pcfactor * month_group, 
+                         data = BM_Store_pc
+                         )
+
+
+AIC(negbi_bmpc_rq_1,negbi_bmpc_rq_2)
+BIC(negbi_bmpc_rq_1,negbi_bmpc_rq_2)#log transfer store_number_of_skus leads to better model fit due to lower AIC/BIC scores.
+
+gqtest(negbi_bmpc_rq_2) 
+bptest(negbi_bmpc_rq_2) #Significant Breusch-Pagan test  indicates heteroscedasticity. 
+
+HWrobstder <- sqrt(diag(vcovHC(negbi_bmpc_rq_2, type="HC1")))
+stargazer(negbi_bmpc_rq_2, negbi_bmpc_rq_2,  
+          se=list(NULL, HWrobstder),
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) 
+
+# Model fit assessment
+negbi_bmpc_rq_2a <- glm.nb(returnquantity ~ 1, data = BM_Store_pc) 
+lrtest(negbi_bmpc_rq_2, negbi_bmpc_rq_2a) # # Model fits the data because LR test statistics is  significant.
+
+#marginal effect 
+meffect_bmpc_rq <- ggpredict(negbi_bmpc_rq_2, terms=c("month_group","policy_change","pcfactor")) 
+
+
+ggplot(meffect_bmpc_rq,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+  xlab("Time") + ylab("Predicted Return Quantity") +
+     labs(colour="policy_change") + 
+    theme(axis.title.x=element_blank())+facet_grid(~facet,scales='free') # for some product groups, the slope difference is quite obvious, while for some of them, it's very hard to identify through visual observation.
+
+ggplot(meffect_bmpc_rq,aes(x, predicted, colour=group)) + geom_line(size=1.3) + 
+  xlab("Time") + ylab("Predicted Return Quantity") +
+     labs(colour="policy_change") + 
+    theme(axis.title.x=element_blank())+facet_wrap(~facet,scales='free',ncol=5)
+#use for loop to subset the data per product catergory and investigate if the interaction coeffcient is significant.
+
+
+
+bmpc_rq_model <- list() # can not run #17 maybe because it only has one value?
+
+for (m in x2) {
+    bmpc_rq_model[[m]] <- glm.nb(returnquantity ~ 
+                                   avg_female + avg_age + avg_income + avg_homeowner + avg_residency + 
+                                   avg_childowner + store_average_price + log(store_number_of_skus)+ 
+                                   sa_gender + sa_full_time + sa_avg_years_of_exp + sa_married + 
+                                   sa_avg_rate_of_pay + store_average_price + sa_dependent + 
+                                   policy_change * month_group, 
+                                 data = bmpc_list[[m]] 
+                       )
+}
+
+stargazer(bmpc_rq_model[[1]],bmpc_rq_model[[2]],bmpc_rq_model[[4]],bmpc_rq_model[[5]],bmpc_rq_model[[6]],bmpc_rq_model[[7]],bmpc_rq_model[[9]],bmpc_rq_model[[10]],
+          type="text",digits=2,apply.coef = exp,titile=paste("BMPC Return Quantity Model","1-10","Results"))
+
+stargazer(bmpc_rq_model[[12]],bmpc_rq_model[[13]],bmpc_rq_model[[14]],bmpc_rq_model[[15]],bmpc_rq_model[[16]],bmpc_rq_model[[21]],
+          type="text",digits=2,apply.coef = exp,titile=paste("BMPC Return Quantity Model","1-10","Results"))
+
+```

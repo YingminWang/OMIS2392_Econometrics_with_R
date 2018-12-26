@@ -1,0 +1,203 @@
+---
+title: "Case Study-4"
+author: "Necati Ertekin"
+output: word_document
+---
+#==========================================================
+## SET UP R MARKDOWN
+#==========================================================
+```{r}
+# You should generally clear the working space at the start of every R session
+rm(list = ls())
+
+# Set the directory
+setwd("/Users/YingminWang/Desktop/OMIS\ 2392/Case/case4-amazon")
+
+# install packages
+#install.packages("ggeffects")
+#install.packages("QuantPsyc")
+#install.packages("VIF")
+#install.packages("usdm")
+#install.packages("lmtest")
+#install.packages("multiwayvcov")
+#install.packages("sandwich")
+#install.packages("AER")
+#install.packages("aod")
+#install.packages("mfx")
+
+# Load libraries everytime you start a session
+library(stargazer)
+library(gdata)
+library(ggplot2)
+library(psych) 
+library(ggeffects)
+library(QuantPsyc)
+library(usdm)
+library(lmtest)
+library(multiwayvcov)
+library(sandwich)
+library(foreign)
+library(AER)
+library(aod)
+library(Rcpp)
+library(mfx)
+library(nnet)
+library(reshape2)
+library(VIF)
+library(msm)
+
+# turn off scientific notation except for big numbers. 
+options(scipen = 9)
+```
+#==========================================================
+## READ AND EXPLORE DATA
+#==========================================================
+```{r}
+mydata = read.csv("Amazon.csv")
+
+stargazer(mydata, type="text", median=TRUE, iqr=TRUE,digits=1, title="Descriptive Statistics")  
+ # basic descriptive statistics
+
+ggplot(mydata, aes(purchase)) +  geom_histogram()
+ggplot(mydata, aes(log(purchase))) +  geom_histogram()  # We will use log-transformed purchase as the dependent variable
+```
+
+#==========================================================
+## DEVELOP OLS REGRESSION MODEL
+#==========================================================
+```{r}
+OLS1 <- lm(log(purchase) ~ facebookvisit + income+gender+cust_age+distance, data = mydata) 
+
+stargazer(OLS1,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))# The variable facebookvisit has a coefficient of 0.06, which is statistically significant. This means that the purchases for customers who visit Facebook before shopping at Amazon.com is 6% more than that for customers who visit Amazon.com directly. This estimate is very close to what we found in the negative binomial regression. So, we can use this model for endogeneity.
+
+gqtest(OLS1) # Goldfeld-Quandt test is not significant, hence there is no heteroscedasticity 
+bptest(OLS1) # Significant Breusch-Pagan test indicates heteroscedasticity! Therefore, we need to provide robust standard errors.
+
+consstder <- sqrt(diag(vcovHC(OLS1, type="const"))) # produces normal standard errors
+HWrobstder <- sqrt(diag(vcovHC(OLS1, type="HC1"))) # produces Huber-White robust standard errors 
+
+stargazer(OLS1, OLS1,  
+          se=list(consstder, HWrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))
+coeftest(OLS1, vcov = vcovHC(OLS1, "HC1")) # The significance levels do not change with robust standard errors. 
+```
+
+#==========================================================
+## DEVELOP POISSON REGRESSION MODEL
+#==========================================================
+```{r}
+
+df=data.frame(log(mydata$purchase),mydata$facebookvisit,mydata$income,mydata$gender,mydata$cust_age,mydata$distance)
+
+cor(df) # Generates the correlation matrix
+vif(df) # Calculates VIF scores. Indicates that there is no multicollinearity as the VIF scores are all less then 3.
+
+poisson1 <- glm(purchase ~ facebookvisit + income+gender+cust_age+distance, family="poisson", data=mydata)
+
+stargazer(poisson1,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) # The coefficient for facebookvisit is 0.079.This means that the expected log count for customers who visit Facebook before Amazon.com is 0.08 higher than the expected log count for customers who visit Amazon.com directly. 
+
+poisson2 <- glm(purchase ~ facebookvisit +  income+gender+cust_age, family="poisson", data=mydata)
+
+stargazer(poisson1, poisson2, 
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1", "Model-2"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001)) # The coefficient for facebookvisit is 0.08.This means that the expected log count for customers who visit Facebook before Amazon.com is 0.08 higher than the expected log count for customers who visit Amazon.com directly. 
+
+anova(poisson1,poisson2,test="Chisq") # distance improves the model fit. 
+
+# Heteroscedasticity test and IRRs
+gqtest(poisson1) # Goldfeld-Quandt test is not significant, hence there is no heteroscedasticity 
+bptest(poisson1) # Significant Breusch-Pagan test indicates heteroscedasticity! Therefore, we need to provide robust standard errors.
+
+HWrobstder <- sqrt(diag(vcovHC(poisson1, type="HC1"))) # produces Huber-White robust standard errors 
+
+stargazer(poisson1, poisson1,  
+          se=list(NULL, HWrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE"),
+          df=FALSE, digits=3, star.cutoffs = c(0.05,0.01,0.001)) # The variable of interest, facebookvisit is still significant with robust standard errors.
+
+stargazer(poisson1, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="Regression Results", type="text", 
+          column.labels=c("IRRs"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))  # The incident rate for facebookvisit is 1.08 times the incident rate for the no facebookvisit. Customers who visit Facebook before Amazon purchase 8% more than customers who visit Amazon.com directly.
+
+# Model fit test
+poisson1a <- glm(purchase~1, data=mydata, family="poisson") # This is the command to run a logit on null model 
+
+lrtest(poisson1, poisson1a) # The model does not fit because the goodness-of-fit chi-squared test is statistically significant. 
+```
+
+#==========================================================
+## DEVELOP NEGATIVE BINOMIAL REGRESSION MODEL
+#==========================================================
+```{r}
+negbin1 <- glm.nb(purchase ~ facebookvisit + income+gender+cust_age+distance, data = mydata)
+
+stargazer(negbin1,  
+          title="Regression Results", type="text", 
+          column.labels=c("Model-1"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))# The variable facebookvisit has a coefficient of 0.08, which is statistically significant. This means that the expected log count of purchases for customers who visit Facebook before shopping at Amazon.com is 0.08 more than that for customers who visit Amazon.com directly. 
+
+# Model fit assessment
+negbin1a <- glm.nb(purchase ~ 1, data = mydata) 
+
+lrtest(negbin1, negbin1a) # # Model fits the data because LR test statistics is significant.
+
+# Test for heteroscedasticity
+gqtest(negbin1) # Goldfeld-Quandt test is not significant, hence there is no heteroscedasticity 
+bptest(negbin1) # Significant Breusch-Pagan test indicates heteroscedasticity! Therefore, we need to provide robust standard errors.
+
+HWrobstder <- sqrt(diag(vcovHC(negbin1, type="HC1"))) # produces Huber-White robust standard errors 
+
+stargazer(negbin1, negbin1,  
+          se=list(NULL, HWrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("Normal SE", "HW-Robust SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))  # The significance levels do not change with robust standard errors.
+
+# Generate IRRs from Negative Binomial regression
+stargazer(negbin1, poisson1, 
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="IRR Comparison", type="text", 
+          column.labels=c("Neg. Binomial", "Poisson"),
+          df=FALSE, digits=3, star.cutoffs = c(0.05,0.01,0.001)) # The incident rate for customers who visit Facebook first is 1.082 times the incident rate for customers who do not visit Facebook. Facebook visits increase purchase quantity by 8.2%. 
+
+# Choosing between Poisson and Negative Binomial regressions
+
+lrtest(poisson1, negbin1) # The significant chi-square test suggests the negative binomial model is more appropriate than the poisson model. It also indicates the data is overdispersed.
+```
+
+#==========================================================
+## TEST FOR ENDOGENEITY USING OLS MODEL
+#==========================================================
+```{r}
+## Endogeneity for Facebook visit
+df=data.frame(log(mydata$purchase),mydata$facebookvisit,mydata$numoffriends,mydata$numofposts,mydata$PublicProfile) # numoffriends, numofposts, and PublicProfile are three potential instrument variables.
+cor(df) # we see that among the three instrument variables, PublicProfile is weakly correlated both with the dependent variable (a good thing) and with the endogenous variable (a bad thing). Numoffriends and numofposts are weakly correlated  with the dependent variable (a good thing) and highly correlated with the endogenous variable (a good thing). Therefore, numoffriends and numofposts are likely to be better instruments than PublcProfile
+
+model1<- ivreg(log(purchase)~ income +gender +cust_age + distance + facebookvisit|numoffriends + numofposts + PublicProfile + distance+ income +gender +cust_age + distance, data=mydata) # We will run the 2SLS with all three instruments to compare the 2SLS with two instruments only.
+
+summary(model1,diagnostics=TRUE) # As we can see, the coefficient of FacebookVisit is 0.065. That means, visiting Facebook before Amazon.com increases purchase amount approximately by 6.5%. Sargan statistic is not significant, meaning the instruments are exogenous. Weak instrument statistic is the F-statistic from the first stage. Since it is 565.3>10, it indicates the instruments are relevant. The significant Durbin-Wu-Hausman test statistic indicates that endogeneity in the model is negligible and therefore the OLS model is sufficient. Overall, the results imply that the endogeneity in our data is negligible. Since we are dealing with count variables, and we know endogeneity is negligible, we will report the results form the negative binomial regression.
+
+stargazer(negbin1,  
+          se=list(HWrobstder),
+          title="Regression Results", type="text", 
+          column.labels=c("HW-Robust SE"),
+          df=FALSE, digits=2, star.cutoffs = c(0.05,0.01,0.001))  # This is the final model we should report since there is heteroscedasticity in the data.
+stargazer(negbin1,
+          apply.coef = exp, t.auto=F, p.auto = F,
+          title="IRR Comparison", type="text", 
+          column.labels=c("Neg. Binomial"),
+          df=FALSE, digits=3, star.cutoffs = c(0.05,0.01,0.001)) # To make it more meaningful, we report the IRRs. Our conclusion is that Facebook visit increases Amazon purchases by about 8.2%.
+
+```
